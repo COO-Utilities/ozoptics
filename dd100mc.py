@@ -3,10 +3,10 @@
 The following controller commands are available.  Not that many are not implemented at the moment.
 The asterisk indicates the commands that are implemented.
 
-A<n>        - Sets attenuation to <n>.
+A<n>      * - Sets attenuation to <n>.
         Two digits to the right of the decimal point are allowed, but not required.
-A?          - Gets attenuation.
-B           - Steps the attenuator one step backward.
+A?        * - Gets attenuation.
+B         * - Steps the attenuator one step backward.
         Returns the final position after the command is completed.
 CD          - Sends the current unit configuration only to the RS-232 communications port.
 CH<hh>      - Sets the I2C address to the hexadecimal address <hh>
@@ -15,30 +15,30 @@ CI<ddd>     - Sets the I2C address to the decimal address <ddd>
         when the address <ddd> is a valid I2C address between 0 and 127.
 CS<cp><dp>  - Sets the SPI parameters to <cp> and <dp>,
         where <cp> is clock polarity and <dp> is data position.
-D           - Gets current attenuation and step position.
-E0          - In RS-232 mode, sets echo to OFF.
+D         * - Gets current attenuation and step position.
+E0        * - In RS-232 mode, sets echo to OFF.
         The unit does not echo any characters received through the RS-232 interface.
-E1          - In RS-232 mode, sets echo to ON.
+E1        * - In RS-232 mode, sets echo to ON.
         The unit echoes all characters received through the RS-232 interface.
 EVA8        - Set the unit in EVA8 mode
 EVA9        - Set the unit in EVA9 mode
 EVA?        - Requests the current EVA configuration mode
-F           - Steps the attenuator one step forward.
-H           - Re-homes the unit.
+F         * - Steps the attenuator one step forward.
+H         * - Re-homes the unit.
 I2C?        - Gets I2C/SPI bus  Voltage
 I2C3        - Sets I2C/SPI bus voltage to 3.3V
 I2C5        - Sets I2C/SPI bus voltage to 5.0V
 L<n>        - Sets the unit’s insertion loss to <n>.
         Two digits following the decimal point are allowed, but not required.
-RES?        - Read previous command response
-RST         - Restarts in response to a hardware or software reset (RST) command
+RES?      * - Read previous command response
+RST       * - Restarts in response to a hardware or software reset (RST) command
         and is in self-test mode.
-S?          - Requests the current position of the attenuator.
+S?        * - Requests the current position of the attenuator.
         Returns the current number of steps from the home position.
-S<n>        - Sets the position of the attenuator to <n> steps from the home position.
-S+<n>       - Sets the step position of the attenuator to <n> steps
+S<n>      * - Sets the position of the attenuator to <n> steps from the home position.
+S+<n>     * - Sets the step position of the attenuator to <n> steps
         numerically greater than the current position.
-S-<n>       - Sets the step position of the attenuator to <n> steps
+S-<n>     * - Sets the step position of the attenuator to <n> steps
         numerically less than the current position.
 W<n>        - Selects the wavelength using <n>.
     This command is valid only when the unit is calibrated for more than one wavelength.
@@ -59,19 +59,23 @@ class Controller:
     """
     # pylint: disable=too-many-instance-attributes
 
-    controller_commands = ["OR",    # Execute HOME search
-                           "PA",    # Absolute move
-                           "PR",    # Move relative
-                           "RS",    # Reset controller
-                           "SL",    # Set/Get positive software limit
-                           "SR",    # Set/Get negative software limit
-                           "TE",    # Get last command error
-                           "TP",    # Get current position
-                           "TS",    # Get positioner error and controller state
-                           "ZT"     # Get all axis parameters
+    controller_commands = ["A",     # Set attenuation
+                           "A?",    # Get attenuation
+                           "B",     # Move attenuator one step backward
+                           "D",     # Gets current attenuation and step position
+                           "E0",    # In RS232 mode, sets echo to OFF
+                           "E1",    # In RS232 mode, sets echo to ON
+                           "F",     # Move attenuator one step forward
+                           "H",     # Re-homes the unit
+                           "RES?",  # Read previous command response
+                           "RST",   # Restarts in self-test mode
+                           "S?",    # Requests current position of the attenuator
+                           "S",     # Sets the position of the attenuator to <n> steps from home
+                           "S+",    # Adds <n> steps to current position
+                           "S-"     # Subtracts <n> steps from current position
                            ]
-    return_value_commands = ["TE", "TP", "TS"]
-    parameter_commands = ["PA", "PR", "SL", "SR"]
+    return_value_commands = ["A?", "D", "RES?", "S?"]
+    parameter_commands = ["A", "S", "S+", "S-"]
     end_code_list = ['32', '33', '34', '35']
     not_ref_list = ['0A', '0B', '0C', '0D', '0F', '10', '11']
     moving_list = ['28']
@@ -99,37 +103,19 @@ class Controller:
         "47": "JOGGING from DISABLE."
     }
     error = {
-        "@": "No error.",
-        "A": "Unknown message code or floating point controller address.",
-        "B": "Controller address not correct",
-        "C": "Parameter missing or out of range.",
-        "D": "Command not allowed.",
-        "E": "Home sequence already started.",
-        "F": "ESP stage name unknown.",
-        "G": "Displacement out of limits.",
-        "H": "Command not allowed in NOT REFERENCED state.",
-        "I": "Command not allowed in CONFIGURATION state.",
-        "J": "Command not allowed in DISABLE state.",
-        "K": "Command not allowed in READY state.",
-        "L": "Command not allowed in HOMING state.",
-        "M": "Command not allowed in MOVING state.",
-        "N": "Current position out of software limit.",
-        "S": "Communication Time Out.",
-        "U": "Error during EEPROM access.",
-        "V": "Error durring command execution.",
-        "W": "Command not allowed for PP version.",
-        "X": "Command not allowed for CC version."
+        "Done": "No error.",
+        "Error-2": "Bad command.  The command is ignored.",
+        "Error-5": "Home sensor error.  Return unit to factory for repair.",
+        "Error-6": "Overflow.  The command is ignored.",
+        "Error-7": "Motor voltage exceeds safe limits"
     }
     last_error = ""
 
-    def __init__(self, num_stages=2, move_rate=5.0, log=True,
-                 logfile=None):
+    def __init__(self, log=True, logfile=None):
 
         """
         Class to handle communications with the stage controller and any faults
 
-        :param num_stages: Int, number of stages daisey-chained
-        :param move_rate: Float, move rate in degrees per second
         :param log: Boolean, whether to log to file or not
         :param logfile: Filename for log
 
@@ -142,16 +128,6 @@ class Controller:
         # Set up socket
         self.socket = None
         self.connected = False
-
-        # number of daisy-chained stages
-        self.num_stages = num_stages
-
-        # stage rate in degrees per second
-        self.move_rate = move_rate
-
-        # current values
-        self.current_position = [0.0] * (num_stages + 1)
-        self.current_limits = [(0., 0.)] * (num_stages + 1)
 
         # set up logging
         self.verbose = False
@@ -266,29 +242,29 @@ class Controller:
             self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
 
         # Are we a valid return value?
-        if recv_len in [6, 11, 12, 13, 14]:
+        if b'Done' in recv:
             if self.logger:
                 self.logger.debug("Return value validated")
         return str(recv.decode('utf-8'))
 
     def __read_params(self):
-        """ Read stage controller parameters """
+        """ Read controller parameters """
         # Get return value
         recv = self.socket.recv(2048)
 
         # Did we get all the params?
         tries = 5
-        while tries > 0 and b'PW0' not in recv:
+        while tries > 0 and b'Done' not in recv:
             recv += self.socket.recv(2048)
             tries -= 1
 
-        if b'PW0' in recv:
+        if b'Done' in recv:
             recv_len = len(recv)
             if self.logger:
-                self.logger.debug("ZT Return: len = %d", recv_len)
+                self.logger.debug("Return: len = %d", recv_len)
         else:
             if self.logger:
-                self.logger.warning("ZT command timed out")
+                self.logger.warning("Command timed out")
 
         return str(recv.decode('utf-8'))
 
@@ -352,11 +328,10 @@ class Controller:
         return {'elaptime': time.time()-start,
                 'error': self.msg.get(code, 'Unknown state')}
 
-    def __send_serial_command(self, stage_id=1, cmd=''):
+    def __send_serial_command(self, cmd=''):
         """
         Send serial command to stage controller
 
-        :param stage_id: Int, stage position in the daisy chain starting with 1
         :param cmd: String, command to send to stage controller
         :return:
         """
@@ -364,7 +339,7 @@ class Controller:
         start = time.time()
 
         # Prep command
-        cmd_send = f"{stage_id}{cmd}\r\n"
+        cmd_send = f"{cmd}\r\n"
         if self.logger:
             self.logger.debug("Sending command:%s", cmd_send)
         cmd_encoded = cmd_send.encode('utf-8')
@@ -392,7 +367,7 @@ class Controller:
 
         return {'elaptime': time.time()-start, msg_type: msg_text}
 
-    def __send_command(self, cmd="", parameters=None, stage_id=1, custom_command=False):
+    def __send_command(self, cmd="", parameters=None, custom_command=False):
         """
         Send a command to the stage controller
 
@@ -404,7 +379,7 @@ class Controller:
         """
 
         # verify cmd and stage_id
-        ret = self.__verify_send_command(cmd, stage_id, custom_command)
+        ret = self.__verify_send_command(cmd, custom_command)
         if 'error' in ret:
             return ret
 
@@ -421,15 +396,14 @@ class Controller:
 
         # Send serial command
         with self.lock:
-            result = self.__send_serial_command(stage_id, cmd)
+            result = self.__send_serial_command(cmd)
 
         return result
 
-    def __verify_send_command(self, cmd, stage_id, custom_command=False):
+    def __verify_send_command(self, cmd, custom_command=False):
         """ Verify cmd and stage_id
 
         :param cmd: String, command to send to the stage controller
-        :param stage_id: Int, stage position in the daisy chain starting with 1
         :param custom_command: Boolean, if true, command is custom
         :return: dictionary {'elaptime': time, 'data|error': string_message}"""
 
@@ -439,11 +413,6 @@ class Controller:
         if not self.connected:
             msg_type = 'error'
             msg_text = 'Not connected to controller'
-
-        # Is stage id valid?
-        elif not self.__verify_stage_id(stage_id):
-            msg_type = 'error'
-            msg_text = f"{stage_id} is not a valid stage"
 
         else:
             # Do we have a legal command?
@@ -460,19 +429,6 @@ class Controller:
 
         return {'elaptime': time.time() - start, msg_type: msg_text}
 
-    def __verify_stage_id(self, stage_id):
-        """ Check that the stage id is legal
-
-        :param stage_id: Int, stage position in the daisy chain starting with 1
-        :return: True if stage id is legal
-        """
-        if stage_id > self.num_stages or stage_id < 1:
-            is_valid = False
-        else:
-            is_valid = True
-
-        return is_valid
-
     def __verify_move_state(self, stage_id, position, move_type='absolute'):
         """ Verify that the move is allowed
         :param stage_id: Int, stage position in the daisy chain starting with 1
@@ -485,12 +441,12 @@ class Controller:
         msg_type = 'data'
         msg_text = 'OK to move'
         # Verify inputs
-        if position is None or stage_id is None:
+        if position is None:
             msg_type = 'error'
-            msg_text = 'must specify both position and stage_id'
+            msg_text = 'must specify position'
         else:
             # Verify move state
-            current_state = self.get_state(stage_id=stage_id)
+            current_state = self.get_state()
             if 'error' in current_state:
                 msg_type = 'error'
                 msg_text = current_state['error']
@@ -500,9 +456,6 @@ class Controller:
             else:
                 # Verify position
                 if 'absolute' not in move_type:
-                    position += self.current_position[stage_id]
-                if position < self.current_limits[stage_id][0] or \
-                   position > self.current_limits[stage_id][1]:
                     msg_type = 'error'
                     msg_text = 'position out of range'
         ret = {'elaptime': time.time() - start, msg_type: msg_text}
@@ -545,10 +498,10 @@ class Controller:
         start = time.time()
 
         if not self.homed(stage_id):
-            ret = self.__send_command(cmd='OR', stage_id=stage_id)
+            ret = self.__send_command(cmd='H')
 
             if 'error' not in ret:
-                while 'READY from HOMING' not in ret['data']:
+                while 'Done' not in ret['data']:
                     time.sleep(1.)
                     ret = self.get_state(stage_id)
                     if 'error' in ret:
@@ -585,12 +538,11 @@ class Controller:
 
         return ret
 
-    def move_abs(self, position=None, stage_id=None, blocking=False):
+    def move_abs(self, position=None, blocking=False):
         """
         Move stage to absolute position and return when in position
 
         :param position: Float, absolute position in degrees
-        :param stage_id: Int, stage position in the daisy chain starting with 1
         :param blocking: Boolean, block until move complete or not
         :return: return from __send_command
         """
@@ -598,7 +550,7 @@ class Controller:
         start = time.time()
 
         # Verify we are ready to move
-        ret = self.__verify_move_state(stage_id=stage_id, position=position)
+        ret = self.__verify_move_state(position=position)
         if 'error' in ret:
             if self.logger:
                 self.logger.error(ret['error'])
@@ -609,8 +561,7 @@ class Controller:
             return {'elaptime': time.time()-start, 'error': ret['data']}
 
         # Send move to controller
-        ret = self.__send_command(cmd="PA", parameters=[position],
-                                  stage_id=stage_id)
+        ret = self.__send_command(cmd="PA", parameters=[position])
 
         if blocking:
             move_len = self.current_position[stage_id] - position
@@ -630,12 +581,11 @@ class Controller:
         ret['elaptime'] = time.time() - start
         return ret
 
-    def move_rel(self, position=None, stage_id=None, blocking=False):
+    def move_rel(self, position=None, blocking=False):
         """
         Move stage to relative position and return when in position
 
         :param position: Float, relative position in degrees
-        :param stage_id: Int, stage position in the daisy chain starting with 1
         :param blocking: Boolean, block until move complete or not
         :return: return from __send_command
         """
@@ -643,8 +593,7 @@ class Controller:
         start = time.time()
 
         # Verify we are ready to move
-        ret = self.__verify_move_state(stage_id=stage_id, position=position,
-                                       move_type='relative')
+        ret = self.__verify_move_state(position=position, move_type='relative')
         if 'error' in ret:
             if self.logger:
                 self.logger.error(ret['error'])
@@ -654,8 +603,7 @@ class Controller:
                 self.logger.error(ret['data'])
             return {'elaptime': time.time()-start, 'error': ret['data']}
 
-        ret = self.__send_command(cmd="PR", parameters=[position],
-                                  stage_id=stage_id)
+        ret = self.__send_command(cmd="PR", parameters=[position])
 
         if blocking:
             if self.move_rate <= 0:
@@ -666,7 +614,7 @@ class Controller:
             if self.logger:
                 self.logger.info("Timeout for move to relative position: %d s",
                                  timeout)
-            ret = self.__read_blocking(stage_id=stage_id, timeout=timeout)
+            ret = self.__read_blocking(timeout=timeout)
 
         if 'error' not in ret:
             self.current_position[stage_id] += position
@@ -674,16 +622,15 @@ class Controller:
         ret['elaptime'] = time.time() - start
         return ret
 
-    def get_state(self, stage_id=1):
+    def get_state(self):
         """ Current state of the stage
 
-        :param stage_id: int, stage position in the daisy chain starting with 1
         :return: return from __send_command
         """
 
         start = time.time()
 
-        ret = self.__send_command(cmd="TS", stage_id=stage_id)
+        ret = self.__send_command(cmd="TS")
         if 'error' not in ret:
             state = self.__return_parse_state(self.__read_value())
             ret['data'] = state
@@ -700,7 +647,7 @@ class Controller:
 
         start = time.time()
 
-        ret = self.__send_command(cmd="TE", stage_id=stage_id)
+        ret = self.__send_command(cmd="TE")
         if 'error' not in ret:
             last_error = self.__return_parse_error(self.__read_value())
             ret['data'] = last_error
@@ -717,7 +664,7 @@ class Controller:
 
         start = time.time()
 
-        ret = self.__send_command(cmd="TP", stage_id=stage_id)
+        ret = self.__send_command(cmd="TP")
         if 'error' not in ret:
             position = float(self.__read_value().rstrip()[3:])
             self.current_position[stage_id] = position
@@ -726,38 +673,15 @@ class Controller:
 
         return ret
 
-    def get_move_rate(self):
-        """ Current move rate
-
-        :return: return from __send_command
-        """
-        start = time.time()
-        return {'elaptime': time.time()-start, 'data': self.move_rate}
-
-    def set_move_rate(self, rate=5.0):
-        """ Set move rate
-
-        :param rate: Float, move rate in degrees per second
-        :return: dictionary {'elaptime': time, 'data': move_rate}
-        """
-        start = time.time()
-        if rate > 0:
-            self.move_rate = rate
-        else:
-            if self.logger:
-                self.logger.error('set_move_rate input error, not changed')
-        return {'elaptime': time.time()-start, 'data': self.move_rate}
-
-    def reset(self, stage_id=1):
+    def reset(self):
         """ Reset stage
 
-        :param stage_id: int, stage position in the daisy chain starting with 1
         :return: return from __send_command
         """
 
         start = time.time()
 
-        ret = self.__send_command(cmd="RS", stage_id=stage_id)
+        ret = self.__send_command(cmd="RS")
         time.sleep(2.)
 
         if 'error' not in ret:
@@ -766,16 +690,15 @@ class Controller:
         ret['elaptime'] = time.time() - start
         return ret
 
-    def get_limits(self, stage_id=1):
+    def get_limits(self):
         """ Get stage limits
-        :param stage_id: int, stage position in the daisy chain starting with 1
         :return: return from __send_command
         """
         start = time.time()
-        ret = self.__send_command(cmd="SL", parameters="?", stage_id=stage_id)
+        ret = self.__send_command(cmd="SL", parameters="?")
         if 'error' not in ret:
             lolim = int(self.__read_value().rstrip()[3:])
-            ret = self.__send_command(cmd="SR", parameters="?", stage_id=stage_id)
+            ret = self.__send_command(cmd="SR", parameters="?")
             if 'error' not in ret:
                 uplim = int(self.__read_value().rstrip()[3:])
                 self.current_limits[stage_id] = (lolim, uplim)
@@ -783,17 +706,16 @@ class Controller:
                        'data': self.current_limits[stage_id]}
         return ret
 
-    def get_params(self, stage_id=1, quiet=False):
+    def get_params(self, quiet=False):
         """ Get stage parameters
 
-        :param stage_id: int, stage position in the daisy chain starting with 1
         :param quiet: Boolean, do not print parameters
         :return: return from __send_command
         """
 
         start = time.time()
 
-        ret = self.__send_command(cmd="ZT", stage_id=stage_id)
+        ret = self.__send_command(cmd="ZT")
 
         if 'error' not in ret:
             params = self.__read_params()
@@ -827,10 +749,9 @@ class Controller:
         self.socket.setblocking(True)
         return str(recv.decode('utf-8'))
 
-    def run_manually(self, stage_id=1):
+    def run_manually(self):
         """ Input stage commands manually
 
-        :param stage_id: int, stage position in the daisy chain starting with 1
         :return: None
         """
 
@@ -841,8 +762,7 @@ class Controller:
             if not cmd:
                 break
 
-            ret = self.__send_command(cmd=cmd, stage_id=stage_id,
-                                      custom_command=True)
+            ret = self.__send_command(cmd=cmd, custom_command=True)
             if 'error' not in ret:
                 output = self.read_from_controller()
                 print(output)
