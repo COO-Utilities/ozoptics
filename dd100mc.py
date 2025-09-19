@@ -105,6 +105,7 @@ class Controller:
 
         self.current_attenuation = None
         self.current_position = None
+        self.homed = False
 
         # set up logging
         self.verbose = False
@@ -213,8 +214,8 @@ class Controller:
                 self.logger.debug("Return value validated")
         return str(recv.decode('utf-8'))
 
-    def __read_params(self):
-        """ Read controller parameters """
+    def __read_response(self):
+        """ Read controller response """
         # Get return value
         recv = self.socket.recv(2048)
 
@@ -222,63 +223,23 @@ class Controller:
         tries = 5
         while tries > 0 and b'Done' not in recv:
             recv += self.socket.recv(2048)
+            if b'Error' in recv:
+                self.logger.error(recv)
+                return self.__return_parse_error(str(recv.decode('utf-8')))
             tries -= 1
 
         if b'Done' in recv:
             recv_len = len(recv)
             if self.logger:
                 self.logger.debug("Return: len = %d", recv_len)
+        elif b'Error' in recv:
+            self.logger.error(recv)
+            return self.__return_parse_error(str(recv.decode('utf-8')))
         else:
             if self.logger:
                 self.logger.warning("Command timed out")
 
         return str(recv.decode('utf-8'))
-
-    def __read_blocking(self, timeout=15):
-        """ Block while reading from the controller.
-        :param timeout: Timeout for blocking read
-        """
-
-        start = time.time()
-
-        # Non-return value commands eventually return state output
-        sleep_time = 0.1
-        start_time = time.time()
-        print_it = 0
-        recv = None
-        while time.time() - start_time < timeout:
-
-            time.sleep(sleep_time)
-            recv = self.socket.recv(1024)
-
-            # Valid state return
-            if b'Done' in recv:
-                # Parse state
-                recv = recv.rstrip()
-
-                if print_it >= 10:
-                    msg = (f"{time.time()-start:05.2f} "
-                           f"Try number {print_it:d}")
-                    if self.logger:
-                        self.logger.info(msg)
-                    else:
-                        print(msg)
-                    print_it = 0
-
-            # Invalid state return (done)
-            else:
-                if self.logger:
-                    self.logger.warning("Bad return: %s", recv)
-                return
-
-            # Increment tries and read state again
-            print_it += 1
-
-        # If we get here, we ran out of tries
-        recv = recv.rstrip()
-        if self.logger:
-            self.logger.warning("Command timed out")
-        return
 
     def __send_serial_command(self, cmd=''):
         """
@@ -287,8 +248,6 @@ class Controller:
         :param cmd: String, command to send to stage controller
         :return:
         """
-
-        start = time.time()
 
         # Prep command
         cmd_send = f"{cmd}\r\n"
@@ -316,7 +275,7 @@ class Controller:
             if self.logger:
                 self.logger.error(msg_text)
 
-        return {'elaptime': time.time()-start, msg_type: msg_text}
+        return {msg_type: msg_text}
 
     def __send_command(self, cmd="", parameters=None, custom_command=False):
         """
@@ -357,8 +316,6 @@ class Controller:
         :param custom_command: Boolean, if true, command is custom
         :return: dictionary {'elaptime': time, 'data|error': string_message}"""
 
-        start = time.time()
-
         # Do we have a connection?
         if not self.connected:
             msg_type = 'error'
@@ -377,7 +334,7 @@ class Controller:
                     msg_type = 'data'
                     msg_text = f"{cmd} is a custom command"
 
-        return {'elaptime': time.time() - start, msg_type: msg_text}
+        return {msg_type: msg_text}
 
     def __return_parse_error(self, error=""):
         """
@@ -388,33 +345,22 @@ class Controller:
         :return: String message
         """
         error = error.rstrip()
-        code = error[-1:]
-        return self.error.get(code, "Unknown error")
+        return self.error.get(error, "Unknown error")
 
-    def home(self, stage_id=1):
+    def home(self):
         """
         Home the stage
 
-        :param stage_id: Int, stage position in the daisy chain starting with 1
         :return: return from __send_command
         """
 
-        start = time.time()
-
-        if not self.homed(stage_id):
+        if not self.homed:
             ret = self.__send_command(cmd='H')
 
             if 'error' not in ret:
-                while 'Done' not in ret['data']:
-                    time.sleep(1.)
-                    ret = self.get_state(stage_id)
-                    if 'error' in ret:
-                        break
-                    if self.logger:
-                        self.logger.info(ret['data'])
-                ret['elaptime'] = time.time() - start
+                ret = self.__read_response()
         else:
-            ret = { 'elaptime': time.time()-start, 'data': 'already homed' }
+            ret = {'data': 'already homed' }
 
         return ret
 
