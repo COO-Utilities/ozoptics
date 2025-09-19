@@ -76,32 +76,6 @@ class Controller:
                            ]
     return_value_commands = ["A?", "D", "RES?", "S?"]
     parameter_commands = ["A", "S", "S+", "S-"]
-    end_code_list = ['32', '33', '34', '35']
-    not_ref_list = ['0A', '0B', '0C', '0D', '0F', '10', '11']
-    moving_list = ['28']
-    msg = {
-        "0A": "NOT REFERENCED from reset.",
-        "0B": "NOT REFERENCED from HOMING.",
-        "0C": "NOT REFERENCED from CONFIGURATION.",
-        "0D": "NOT REFERENCED from DISABLE.",
-        "0E": "NOT REFERENCED from READY.",
-        "0F": "NOT REFERENCED from MOVING.",
-        "10": "NOT REFERENCED ESP stage error.",
-        "11": "NOT REFERENCED from JOGGING.",
-        "14": "CONFIGURATION.",
-        "1E": "HOMING commanded from RS-232-C.",
-        "1F": "HOMING commanded by SMC-RC.",
-        "28": "MOVING.",
-        "32": "READY from HOMING.",
-        "33": "READY from MOVING.",
-        "34": "READY from DISABLE.",
-        "35": "READY from JOGGING.",
-        "3C": "DISABLE from READY.",
-        "3D": "DISABLE from MOVING.",
-        "3E": "DISABLE from JOGGING.",
-        "46": "JOGGING from READY.",
-        "47": "JOGGING from DISABLE."
-    }
     error = {
         "Done": "No error.",
         "Error-2": "Bad command.  The command is ignored.",
@@ -111,7 +85,7 @@ class Controller:
     }
     last_error = ""
 
-    def __init__(self, log=True, logfile=None):
+    def __init__(self, log: bool =True, logfile: str =None):
 
         """
         Class to handle communications with the stage controller and any faults
@@ -128,6 +102,9 @@ class Controller:
         # Set up socket
         self.socket = None
         self.connected = False
+
+        self.current_attenuation = None
+        self.current_position = None
 
         # set up logging
         self.verbose = False
@@ -151,7 +128,7 @@ class Controller:
         else:
             self.logger = None
 
-    def set_verbose(self, verbose=True):
+    def set_verbose(self, verbose: bool =True):
         """ Set verbose mode.
 
         :param verbose: Boolean, set to True to enable DEBUG level messages,
@@ -164,13 +141,12 @@ class Controller:
             else:
                 self.logger.setLevel(logging.INFO)
 
-    def connect(self, host=None, port=None):
+    def connect(self, host: str =None, port: int =None):
         """ Connect to stage controller.
 
         :param host: String, host ip address
         :param port: Int, Port number
         """
-        start = time.time()
         if self.socket is None:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -181,28 +157,22 @@ class Controller:
                     'port': port
                 })
             self.connected = True
-            ret = {'elaptime': time.time()-start, 'data': 'connected'}
 
         except OSError as ex:
             if ex.errno == errno.EISCONN:
                 if self.logger:
                     self.logger.debug("Already connected")
                 self.connected = True
-                ret = {'elaptime': time.time()-start, 'data': 'already connected'}
             else:
                 if self.logger:
                     self.logger.error("Connection error: %s", ex.strerror)
                 self.connected = False
-                ret = {'elaptime': time.time()-start, 'error': ex.strerror}
         # clear socket
         if self.connected:
             self.__clear_socket()
 
-        return ret
-
     def disconnect(self):
         """ Disconnect stage controller. """
-        start = time.time()
         try:
             self.socket.shutdown(socket.SHUT_RDWR)
             self.socket.close()
@@ -210,15 +180,11 @@ class Controller:
             if self.logger:
                 self.logger.debug("Disconnected controller")
             self.connected = False
-            ret = {'elaptime': time.time()-start, 'data': 'disconnected'}
         except OSError as ex:
             if self.logger:
                 self.logger.error("Disconnection error: %s", ex.strerror)
             self.connected = False
             self.socket = None
-            ret = {'elaptime': time.time()-start, 'error': ex.strerror}
-
-        return ret
 
     def __clear_socket(self):
         """ Clear socket buffer. """
@@ -268,9 +234,8 @@ class Controller:
 
         return str(recv.decode('utf-8'))
 
-    def __read_blocking(self, stage_id=1, timeout=15):
+    def __read_blocking(self, timeout=15):
         """ Block while reading from the controller.
-        :param stage_id: Int, stage id
         :param timeout: Timeout for blocking read
         """
 
@@ -282,27 +247,18 @@ class Controller:
         print_it = 0
         recv = None
         while time.time() - start_time < timeout:
-            # Check state
-            statecmd = f'{stage_id}TS\r\n'
-            statecmd = statecmd.encode('utf-8')
-            self.socket.send(statecmd)
+
             time.sleep(sleep_time)
             recv = self.socket.recv(1024)
 
             # Valid state return
-            if len(recv) == 11:
+            if b'Done' in recv:
                 # Parse state
                 recv = recv.rstrip()
-                code = str(recv[-2:].decode('utf-8'))
-
-                # Valid end code or not referenced code (done)
-                if code in self.end_code_list or code in self.not_ref_list:
-                    return {'elaptime': time.time()-start,
-                            'data': self.msg.get(code, 'Unknown state')}
 
                 if print_it >= 10:
                     msg = (f"{time.time()-start:05.2f} "
-                           f"{self.msg.get(code, 'Unknown state'):s}")
+                           f"Try number {print_it:d}")
                     if self.logger:
                         self.logger.info(msg)
                     else:
@@ -312,21 +268,17 @@ class Controller:
             # Invalid state return (done)
             else:
                 if self.logger:
-                    self.logger.warning("Bad %dTS return: %s", stage_id, recv)
-                return {'elaptime': time.time()-start,
-                        'error': str(recv.decode('utf-8'))}
+                    self.logger.warning("Bad return: %s", recv)
+                return
 
             # Increment tries and read state again
             print_it += 1
 
         # If we get here, we ran out of tries
         recv = recv.rstrip()
-        code = str(recv[-2:].decode('utf-8'))
         if self.logger:
-            self.logger.warning("Command timed out, final state: %s",
-                           self.msg.get(code, "Unknown state"))
-        return {'elaptime': time.time()-start,
-                'error': self.msg.get(code, 'Unknown state')}
+            self.logger.warning("Command timed out")
+        return
 
     def __send_serial_command(self, cmd=''):
         """
@@ -346,7 +298,6 @@ class Controller:
 
         # check connection
         if not self.connected:
-            msg_type = 'error'
             msg_text = "Not connected to controller!"
             if self.logger:
                 self.logger.error(msg_text)
@@ -373,7 +324,6 @@ class Controller:
 
         :param cmd: String, command to send to the stage controller
         :param parameters: List of string parameters associated with cmd
-        :param stage_id: Int, stage position in the daisy chain starting with 1
         :param custom_command: Boolean, if true, command is custom
         :return:
         """
@@ -388,7 +338,7 @@ class Controller:
             if self.logger:
                 self.logger.debug("Adding parameters")
             parameters = [str(x) for x in parameters]
-            parameters = " ".join(parameters)
+            parameters = "".join(parameters)
             cmd += parameters
 
         if self.logger:
@@ -429,52 +379,6 @@ class Controller:
 
         return {'elaptime': time.time() - start, msg_type: msg_text}
 
-    def __verify_move_state(self, stage_id, position, move_type='absolute'):
-        """ Verify that the move is allowed
-        :param stage_id: Int, stage position in the daisy chain starting with 1
-        :param position: String, move position
-        :param move_type: String, move type: 'absolute' or 'relative'
-        :return: True if move is allowed"""
-
-        start = time.time()
-
-        msg_type = 'data'
-        msg_text = 'OK to move'
-        # Verify inputs
-        if position is None:
-            msg_type = 'error'
-            msg_text = 'must specify position'
-        else:
-            # Verify move state
-            current_state = self.get_state()
-            if 'error' in current_state:
-                msg_type = 'error'
-                msg_text = current_state['error']
-            elif 'READY' not in current_state['data']:
-                msg_type = 'error'
-                msg_text = current_state['data']
-            else:
-                # Verify position
-                if 'absolute' not in move_type:
-                    msg_type = 'error'
-                    msg_text = 'position out of range'
-        ret = {'elaptime': time.time() - start, msg_type: msg_text}
-        if self.logger:
-            self.logger.debug("Move state: %s", msg_text)
-        return ret
-
-    def __return_parse_state(self, message=""):
-        """
-        Parse the return message from the controller.  The message code is
-        given in the last two string characters
-
-        :param message: String message code from the controller
-        :return: String message
-        """
-        message = message.rstrip()
-        code = message[-2:]
-        return self.msg.get(code, "Unknown state")
-
     def __return_parse_error(self, error=""):
         """
         Parse the return error message from the controller.  The message code is
@@ -514,160 +418,54 @@ class Controller:
 
         return ret
 
-    def homed(self, stage_id=1):
-        """ Is the stage homed?
-        :param stage_id: Int, stage position in the daisy chain starting with 1
-        :return: Boolean, True if homed else False
-        """
-
-        state = self.get_state(stage_id=stage_id)
-
-        if 'error' in state:
-            if self.logger:
-                self.logger.error(state['error'])
-            ret = False
-
-        else:
-            if 'NOT REFERENCED' in state['data']:
-                ret = False
-            else:
-                ret = True
-
-            if self.logger:
-                self.logger.debug(state['data'])
-
-        return ret
-
-    def move_abs(self, position=None, blocking=False):
+    def set_attenuation(self, atten=None):
         """
         Move stage to absolute position and return when in position
 
-        :param position: Float, absolute position in degrees
-        :param blocking: Boolean, block until move complete or not
+        :param atten: Float, absolute attenuation in fraction
         :return: return from __send_command
         """
 
         start = time.time()
-
-        # Verify we are ready to move
-        ret = self.__verify_move_state(position=position)
-        if 'error' in ret:
-            if self.logger:
-                self.logger.error(ret['error'])
-            return ret
-        if 'OK to move' not in ret['data']:
-            if self.logger:
-                self.logger.error(ret['data'])
-            return {'elaptime': time.time()-start, 'error': ret['data']}
 
         # Send move to controller
-        ret = self.__send_command(cmd="PA", parameters=[position])
-
-        if blocking:
-            move_len = self.current_position[stage_id] - position
-            if self.move_rate <= 0:
-                timeout = 5
-            else:
-                timeout = int(abs(move_len / self.move_rate))
-            timeout = max(timeout, 5)
-            if self.logger:
-                self.logger.info("Timeout for move to absolute position: %d s",
-                                 timeout)
-            ret = self.__read_blocking(stage_id=stage_id, timeout=timeout)
+        ret = self.__send_command(cmd="A", parameters=[atten])
 
         if 'error' not in ret:
-            self.current_position[stage_id] = position
+            self.current_attenuation = atten
 
         ret['elaptime'] = time.time() - start
         return ret
 
-    def move_rel(self, position=None, blocking=False):
+    def step(self, direction:str = 'F'):
         """
         Move stage to relative position and return when in position
-
-        :param position: Float, relative position in degrees
-        :param blocking: Boolean, block until move complete or not
+        :param direction: String, 'F' - forward or 'B' - backward
         :return: return from __send_command
         """
 
         start = time.time()
 
-        # Verify we are ready to move
-        ret = self.__verify_move_state(position=position, move_type='relative')
-        if 'error' in ret:
-            if self.logger:
-                self.logger.error(ret['error'])
-            return ret
-        if 'OK to move' not in ret['data']:
-            if self.logger:
-                self.logger.error(ret['data'])
-            return {'elaptime': time.time()-start, 'error': ret['data']}
-
-        ret = self.__send_command(cmd="PR", parameters=[position])
-
-        if blocking:
-            if self.move_rate <= 0:
-                timeout = 5
-            else:
-                timeout = int(abs(position / self.move_rate))
-            timeout = max(timeout, 5)
-            if self.logger:
-                self.logger.info("Timeout for move to relative position: %d s",
-                                 timeout)
-            ret = self.__read_blocking(timeout=timeout)
+        ret = self.__send_command(cmd=direction)
 
         if 'error' not in ret:
-            self.current_position[stage_id] += position
+            self.current_position += 1
 
         ret['elaptime'] = time.time() - start
         return ret
 
-    def get_state(self):
-        """ Current state of the stage
-
-        :return: return from __send_command
-        """
-
-        start = time.time()
-
-        ret = self.__send_command(cmd="TS")
-        if 'error' not in ret:
-            state = self.__return_parse_state(self.__read_value())
-            ret['data'] = state
-            ret['elaptime'] = time.time() - start
-
-        return ret
-
-    def get_last_error(self, stage_id=1):
-        """ Last error
-
-        :param stage_id: int, stage position in the daisy chain starting with 1
-        :return: return from __send_command
-        """
-
-        start = time.time()
-
-        ret = self.__send_command(cmd="TE")
-        if 'error' not in ret:
-            last_error = self.__return_parse_error(self.__read_value())
-            ret['data'] = last_error
-            ret['elaptime'] = time.time() - start
-
-        return ret
-
-    def get_position(self, stage_id=1):
+    def get_position(self):
         """ Current position
 
-        :param stage_id: int, stage position in the daisy chain starting with 1
         :return: return from __send_command
         """
 
         start = time.time()
 
-        ret = self.__send_command(cmd="TP")
+        ret = self.__send_command(cmd="S?")
         if 'error' not in ret:
             position = float(self.__read_value().rstrip()[3:])
-            self.current_position[stage_id] = position
+            self.current_position = position
             ret['data'] = position
             ret['elaptime'] = time.time() - start
 
@@ -688,22 +486,6 @@ class Controller:
             self.read_from_controller()
 
         ret['elaptime'] = time.time() - start
-        return ret
-
-    def get_limits(self):
-        """ Get stage limits
-        :return: return from __send_command
-        """
-        start = time.time()
-        ret = self.__send_command(cmd="SL", parameters="?")
-        if 'error' not in ret:
-            lolim = int(self.__read_value().rstrip()[3:])
-            ret = self.__send_command(cmd="SR", parameters="?")
-            if 'error' not in ret:
-                uplim = int(self.__read_value().rstrip()[3:])
-                self.current_limits[stage_id] = (lolim, uplim)
-                ret = {'elaptime': time.time()-start,
-                       'data': self.current_limits[stage_id]}
         return ret
 
     def get_params(self, quiet=False):
