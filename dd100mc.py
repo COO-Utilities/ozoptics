@@ -275,7 +275,7 @@ class Controller:
         Send serial command to stage controller
 
         :param cmd: String, command to send to stage controller
-        :return:
+        :return: dictionary {'data|error': string_message}
         """
 
         # Prep command
@@ -313,7 +313,7 @@ class Controller:
         :param cmd: String, command to send to the stage controller
         :param parameters: List of string parameters associated with cmd
         :param custom_command: Boolean, if true, command is custom
-        :return:
+        :return: dictionary {'data|error': string_message}
         """
 
         # verify cmd and stage_id
@@ -343,7 +343,7 @@ class Controller:
 
         :param cmd: String, command to send to the stage controller
         :param custom_command: Boolean, if true, command is custom
-        :return: dictionary {'elaptime': time, 'data|error': string_message}"""
+        :return: dictionary {'data|error': string_message}"""
 
         # Do we have a connection?
         if not self.connected:
@@ -407,7 +407,7 @@ class Controller:
         Move stage to absolute position and return when in position
 
         :param atten: Float, absolute attenuation in fraction
-        :return: return from __send_command
+        :return: dictionary {'data|error': current_attenuation|string_message}
         """
 
         # Send move to controller
@@ -415,12 +415,12 @@ class Controller:
 
         if 'data' in ret:
             retval = self.__read_response()
-            set_atten = self.__extract_attenuation(retval['data'])
-            if set_atten != atten:
+            cur_atten = self.__extract_attenuation(retval['data'])
+            if cur_atten != atten:
                 if self.logger:
                     self.logger.error("Attenuation setting not achieved!")
-            self.current_attenuation = set_atten
-            return {'data': set_atten}
+            self.current_attenuation = cur_atten
+            return {'data': cur_atten}
 
         return ret
 
@@ -428,23 +428,34 @@ class Controller:
         """
         Move stage to relative position and return when in position
         :param direction: String, 'F' - forward or 'B' - backward
-        :return: return from __send_command
+        :return: dictionary {'data|error': current_position|string_message}
         """
-
-        start = time.time()
+        # check inputs
+        if direction not in ['F', 'B']:
+            if self.logger:
+                self.logger.error("Invalid direction")
+            return {'error': 'Invalid direction'}
 
         ret = self.__send_command(cmd=direction)
 
-        if 'error' not in ret:
-            self.current_position += 1
-
-        ret['elaptime'] = time.time() - start
+        if 'data' in ret:
+            retval = self.__read_response()
+            if 'data' in retval:
+                ret = {}
+                position = self.__extract_position(retval['data'])
+                if position is not None:
+                    self.current_position = position
+                    ret['data'] = position
+                else:
+                    ret['error'] = "Invalid position"
+            else:
+                ret = retval
         return ret
 
     def get_position(self):
         """ Current position
 
-        :return: return from __send_command
+        :return: dictionary {'data|error': current_position|string_message}
         """
 
         ret = self.__send_command(cmd="S?")
@@ -468,46 +479,41 @@ class Controller:
         :return: return from __send_command
         """
 
-        start = time.time()
-
         ret = self.__send_command(cmd="RS")
         time.sleep(2.)
 
         if 'error' not in ret:
             self.read_from_controller()
 
-        ret['elaptime'] = time.time() - start
         return ret
 
-    def get_params(self, quiet=False):
+    def get_params(self):
         """ Get stage parameters
 
-        :param quiet: Boolean, do not print parameters
         :return: return from __send_command
         """
 
-        start = time.time()
+        ret = self.__send_command(cmd="CD")
 
-        ret = self.__send_command(cmd="ZT")
-
-        if 'error' not in ret:
-            params = self.__read_params()
-            if not quiet:
-                for param in params.split():
-                    if 'PW' not in param:
-                        print(param)
-            ret['data'] = params
-            ret['elaptime'] = time.time() - start
-
+        if 'data' in ret:
+            retval = self.__read_response()
+            if 'data' in retval:
+                self.configuration = retval['data']
+                ret['data'] = self.configuration
+            else:
+                ret = retval
         return ret
 
     def initialize_controller(self):
         """ Initialize stage controller. """
-        start = time.time()
-        for i in range(self.num_stages):
-            self.get_position(i+1)
-            self.get_limits(i+1)
-        return {'elaptime': time.time()-start, 'data': 'initialized'}
+        ret = self.home()
+        if 'data' in ret:
+            retval = self.__read_response()
+            if 'data' in retval:
+                ret['data'] = 'intialized'
+            else:
+                ret = retval
+        return ret
 
     def read_from_controller(self):
         """ Read from controller"""
