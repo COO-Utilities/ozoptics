@@ -202,52 +202,73 @@ class Controller:
                     break
             self.socket.setblocking(True)
 
-    def __read_posn(self):
-        """ Read returned attenuator steps position from controller """
-        # Return value commands
-
-        # Get return value
-        recv = self.socket.recv(2048)
-        recv_len = len(recv)
-        if self.logger:
-            self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
-
-        # Are we a valid return value?
-        posn = None
-        if b'Done' in recv and b'Pos:' in recv:
-            if self.logger:
-                self.logger.debug("Return value validated")
-            posn = int(recv.split(b'Pos:')[-1].split()[0])
-        else:
-            self.logger.error("Return value not validated")
-        return posn
-
-    def __read_configuration(self):
-        """ Read controller response """
+    def __read_response(self):
+        """Read the return message from stage controller."""
         # Get return value
         recv = self.socket.recv(2048)
 
-        # Did we get all the params?
+        # Return type
+        msg_type = 'data'
+
+        # Did we get the entire return?
         tries = 5
         while tries > 0 and b'Done' not in recv:
             recv += self.socket.recv(2048)
             if b'Error' in recv:
-                self.logger.error(recv)
-                return self.__return_parse_error(str(recv.decode('utf-8')))
+                if self.logger:
+                    self.logger.error(recv)
+                return {'error': self.__return_parse_error(str(recv.decode('utf-8')))}
             tries -= 1
 
-        if b'Done' in recv:
-            recv_len = len(recv)
+        recv_len = len(recv)
+        if self.logger:
+            self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
+
+        if b'Done' not in recv:
             if self.logger:
-                self.logger.debug("Return: len = %d", recv_len)
-        elif b'Error' in recv:
-            self.logger.error(recv)
-            return self.__return_parse_error(str(recv.decode('utf-8')))
+                self.logger.warning("Read from controller timed out")
+            msg_type = 'error'
+
+        return {msg_type: str(recv.decode('utf-8'))}
+
+    def __extract_position(self, retval):
+        """ Read returned attenuator position in steps from home from controller """
+
+        # Are we a valid return value?
+        posn = None
+        if 'Done' in retval and 'Pos:' in retval:
+            if self.logger:
+                self.logger.debug("Return value validated")
+            posn = int(retval.split('Pos:')[-1].split()[0])
+        else:
+            self.logger.error("Return value not valid")
+        return posn
+
+    def __extract_attenuation(self, retval):
+        """ Read returned attenuation in dB from controller """
+
+        # Are we a valid return value?
+        attn = None
+        if 'Done' in retval and 'Attn:' in retval:
+            if self.logger:
+                self.logger.debug("Return value validated")
+            attn = int(retval.split('Pos:')[-1].split()[0].split('(dB)')[0])
+        else:
+            self.logger.error("Return value not valid")
+        return attn
+
+    def __extract_configuration(self, retval):
+        """ Read controller response """
+
+        recv_len = len(retval)
+        if 'Done' in retval and recv_len > 1:
+            if self.logger:
+                self.logger.debug("Return value validated")
         else:
             if self.logger:
-                self.logger.warning("Command timed out")
+                self.logger.warning("Return value error")
 
-        return str(recv.decode('utf-8'))
+        return retval
 
     def __send_serial_command(self, cmd=''):
         """
@@ -365,8 +386,17 @@ class Controller:
         if not self.homed:
             ret = self.__send_command(cmd='H')
 
-            if 'error' not in ret:
+            if 'data' in ret:
                 ret = self.__read_response()
+                if 'error' in ret:
+                    if self.logger:
+                        self.logger.error(ret['error'])
+                else:
+                    if self.logger:
+                        self.logger.debug(ret['data'])
+            else:
+                if self.logger:
+                    self.logger.error(ret['error'])
         else:
             ret = {'data': 'already homed' }
 
@@ -380,15 +410,18 @@ class Controller:
         :return: return from __send_command
         """
 
-        start = time.time()
-
         # Send move to controller
         ret = self.__send_command(cmd="A", parameters=[atten])
 
-        if 'error' not in ret:
-            self.current_attenuation = atten
+        if 'data' in ret:
+            retval = self.__read_response()
+            set_atten = self.__extract_attenuation(retval['data'])
+            if set_atten != atten:
+                if self.logger:
+                    self.logger.error("Attenuation setting not achieved!")
+            self.current_attenuation = set_atten
+            return {'data': set_atten}
 
-        ret['elaptime'] = time.time() - start
         return ret
 
     def step(self, direction:str = 'F'):
@@ -414,15 +447,19 @@ class Controller:
         :return: return from __send_command
         """
 
-        start = time.time()
-
         ret = self.__send_command(cmd="S?")
-        if 'error' not in ret:
-            position = float(self.__read_value().rstrip()[3:])
-            self.current_position = position
-            ret['data'] = position
-            ret['elaptime'] = time.time() - start
-
+        if 'data' in ret:
+            retval = self.__read_response()
+            if 'data' in retval:
+                ret = {}
+                position = self.__extract_position(retval['data'])
+                if position is not None:
+                    self.current_position = position
+                    ret['data'] = position
+                else:
+                    ret['error'] = "Invalid position"
+            else:
+                ret = retval
         return ret
 
     def reset(self):
