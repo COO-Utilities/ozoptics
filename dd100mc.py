@@ -62,11 +62,13 @@ class Controller:
     controller_commands = ["A",     # Set attenuation
                            "A?",    # Get attenuation
                            "B",     # Move attenuator one step backward
+                           "CD",    # Configuration Display
                            "D",     # Gets current attenuation and step position
                            "E0",    # In RS232 mode, sets echo to OFF
                            "E1",    # In RS232 mode, sets echo to ON
                            "F",     # Move attenuator one step forward
                            "H",     # Re-homes the unit
+                           "L",     # Insertion loss
                            "RES?",  # Read previous command response
                            "RST",   # Restarts in self-test mode
                            "S?",    # Requests current position of the attenuator
@@ -74,8 +76,9 @@ class Controller:
                            "S+",    # Adds <n> steps to current position
                            "S-"     # Subtracts <n> steps from current position
                            ]
-    return_value_commands = ["A?", "D", "RES?", "S?"]
-    parameter_commands = ["A", "S", "S+", "S-"]
+    return_value_commands = ["A", "A?", "B", "CD", "D", "F", "H", "L",
+                             "RES?", "RST", "S?", "S", "S+", "S-" ]
+    parameter_commands = ["A", "L", "S", "S+", "S-"]
     error = {
         "Done": "No error.",
         "Error-2": "Bad command.  The command is ignored.",
@@ -105,6 +108,7 @@ class Controller:
 
         self.current_attenuation = None
         self.current_position = None
+        self.configuration = ""
         self.homed = False
 
         # set up logging
@@ -198,8 +202,8 @@ class Controller:
                     break
             self.socket.setblocking(True)
 
-    def __read_value(self):
-        """ Read return value from controller """
+    def __read_posn(self):
+        """ Read returned attenuator steps position from controller """
         # Return value commands
 
         # Get return value
@@ -209,12 +213,16 @@ class Controller:
             self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
 
         # Are we a valid return value?
-        if b'Done' in recv:
+        posn = None
+        if b'Done' in recv and b'Pos:' in recv:
             if self.logger:
                 self.logger.debug("Return value validated")
-        return str(recv.decode('utf-8'))
+            posn = int(recv.split(b'Pos:')[-1].split()[0])
+        else:
+            self.logger.error("Return value not validated")
+        return posn
 
-    def __read_response(self):
+    def __read_configuration(self):
         """ Read controller response """
         # Get return value
         recv = self.socket.recv(2048)
