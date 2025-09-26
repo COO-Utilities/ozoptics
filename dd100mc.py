@@ -194,7 +194,7 @@ class Controller:
                     break
             self.socket.setblocking(True)
 
-    def __read_response(self):
+    def __read_response(self, response_type:str = ""):
         """Read the return message from stage controller."""
         # Get return value
         recv = self.socket.recv(2048)
@@ -362,15 +362,19 @@ class Controller:
         :param message: String message
         :param level: Log level
         """
+        # logging set up
         if self.logger:
             self.logger.log(level, message)
+        # logging not set up
         else:
-            if level == logging.WARNING:
-                print("WARNING:", message)
-            elif level == logging.ERROR:
-                print("ERROR:", message)
-            elif level == logging.CRITICAL:
-                print("CRITICAL:", message)
+            log_type = logging.getLevelName(level)
+            # print everything
+            if self.verbose:
+                print(log_type + ": " + message)
+            # only print warnings or worse
+            else:
+                if level >= logging.WARNING:
+                    print(log_type + ":", message)
 
     def home(self):
         """
@@ -428,19 +432,25 @@ class Controller:
             return {'error': 'Invalid direction'}
 
         ret = self.__send_command(cmd=direction)
-
         if 'data' in ret:
-            retval = self.__read_response()
-            if 'data' in retval:
-                ret = {}
-                position = self.__extract_position(retval['data'])
-                if position is not None:
-                    self.current_position = position
-                    ret['data'] = position
-                else:
-                    ret['error'] = "Invalid position"
+            retval = self.__read_position()
+            if 'error' in retval:
+                self.__log(retval['error'], logging.ERROR)
+
+    def __read_position(self):
+        """Read response from stage controller and extract current position"""
+
+        retval = self.__read_response()
+        if 'data' in retval:
+            ret = {}
+            position = self.__extract_position(retval['data'])
+            if position is not None:
+                self.current_position = position
+                ret['data'] = position
             else:
-                ret = retval
+                ret['error'] = "Invalid position"
+        else:
+            ret = retval
         return ret
 
     def get_position(self):
@@ -451,15 +461,9 @@ class Controller:
 
         ret = self.__send_command(cmd="S?")
         if 'data' in ret:
-            retval = self.__read_response()
-            if 'data' in retval:
-                ret = {}
-                position = self.__extract_position(retval['data'])
-                if position is not None:
-                    self.current_position = position
-                    ret['data'] = position
-                else:
-                    ret['error'] = "Invalid position"
+            retval = self.__read_position()
+            if 'error' in retval:
+                self.__log(retval['error'], logging.ERROR)
             else:
                 ret = retval
         return ret
