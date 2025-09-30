@@ -44,13 +44,31 @@ W<n>        - Selects the wavelength using <n>.
     This command is valid only when the unit is calibrated for more than one wavelength.
 
 """
-
+import dataclasses
+import enum
 import errno
 import logging
 import time
 import socket
 import threading
 import sys
+from typing import Union
+
+
+class ResponseType(enum.Enum):
+    """Controller response types."""
+    ATTN = "attenuation"
+    POS = "steps"
+    BOTH = "attenuation and steps"
+    STRING = "string"
+    ERROR = "error"
+
+
+@dataclasses.dataclass
+class OzResponse:
+    """Oz controller response data."""
+    type: ResponseType
+    value: Union[float, int, str, dict, None]
 
 
 class Controller:
@@ -86,7 +104,6 @@ class Controller:
         "Error-6": "Overflow.  The command is ignored.",
         "Error-7": "Motor voltage exceeds safe limits"
     }
-    last_error = ""
 
     def __init__(self, log: bool =True, logfile: str =None):
 
@@ -110,6 +127,7 @@ class Controller:
         self.current_position = None
         self.configuration = ""
         self.homed = False
+        self.last_error = ""
 
         # set up logging
         self.verbose = False
@@ -194,13 +212,10 @@ class Controller:
                     break
             self.socket.setblocking(True)
 
-    def __read_response(self, response_type:str = ""):
+    def __read_response(self):
         """Read the return message from stage controller."""
         # Get return value
         recv = self.socket.recv(2048)
-
-        # Return type
-        msg_type = 'data'
 
         # Did we get the entire return?
         tries = 5
@@ -217,43 +232,58 @@ class Controller:
         if b'Done' not in recv:
             self.__log("Read from controller timed out", logging.WARNING)
             msg_type = 'error'
-
-        return {msg_type: str(recv.decode('utf-8'))}
-
-    def __extract_position(self, retval):
-        """ Read returned attenuator position in steps from home from controller """
-
-        # Are we a valid return value?
-        posn = None
-        if 'Done' in retval and 'Pos:' in retval:
-            self.__log("Return value validated")
-            posn = int(retval.split('Pos:')[-1].split()[0])
+            msg_data = str(recv.decode('utf-8'))
         else:
-            self.__log("Return value not valid", logging.ERROR)
-        return posn
+            resp = self.__parse_response(str(recv.decode('utf-8')))
+            if resp.type == ResponseType.ERROR:
+                msg_type = 'error'
+                msg_data = resp.value
+            else:
+                msg_type = 'data'
+                msg_data = resp.value
 
-    def __extract_attenuation(self, retval):
-        """ Read returned attenuation in dB from controller """
+        return {msg_type: msg_data}
 
-        # Are we a valid return value?
-        attn = None
-        if 'Done' in retval and 'Attn:' in retval:
-            self.__log("Return value validated")
-            attn = int(retval.split('Pos:')[-1].split()[0].split('(dB)')[0])
+    def __parse_response(self, raw: str) -> OzResponse:
+        """Parse the response from stage controller."""
+        raw = raw.strip()
+
+        if 'Pos:' in raw:
+            try:
+                pos = int(raw.split('Pos:')[1].split()[0])
+            except ValueError:
+                self.__log("Error parsing position", logging.ERROR)
+                pos = None
         else:
-            self.__log("Return value not valid", logging.ERROR)
-        return attn
+            pos = None
 
-    def __extract_configuration(self, retval):
-        """ Read controller response """
-
-        recv_len = len(retval)
-        if 'Done' in retval and recv_len > 1:
-            self.__log("Return value validated")
+        if 'Attn:' in raw:
+            try:
+                attn = float(raw.split('Attn:')[1].split()[0])
+            except ValueError:
+                self.__log("Error parsing attenuation", logging.ERROR)
+                attn = None
         else:
-            self.__log("Return value error", logging.WARNING)
+            attn = None
 
-        return retval
+        # Error case
+        if 'Error' in raw:
+            return OzResponse(ResponseType.ERROR, raw)
+
+        # Both Attenuation and Steps
+        if pos and attn:
+            return OzResponse(ResponseType.BOTH, {"pos": pos, "attn": attn})
+
+        # Attenuation
+        if attn:
+            return OzResponse(ResponseType.ATTN, attn)
+
+        # Pos
+        if pos:
+            return OzResponse(ResponseType.POS, pos)
+
+        # Default to string
+        return OzResponse(ResponseType.STRING, raw)
 
     def __send_serial_command(self, cmd=''):
         """
@@ -375,6 +405,8 @@ class Controller:
             else:
                 if level >= logging.WARNING:
                     print(log_type + ":", message)
+        if level >= logging.WARNING:
+            self.last_error = message
 
     def home(self):
         """
@@ -392,6 +424,7 @@ class Controller:
                     self.__log(ret['error'], logging.ERROR)
                 else:
                     self.__log(ret['data'])
+                    self.homed = True
             else:
                 self.__log(ret['error'], logging.ERROR)
         else:
@@ -411,12 +444,16 @@ class Controller:
         ret = self.__send_command(cmd="A", parameters=[atten])
 
         if 'data' in ret:
-            retval = self.__read_response()
-            cur_atten = self.__extract_attenuation(retval['data'])
-            if cur_atten != atten:
-                self.__log("Attenuation setting not achieved!", logging.ERROR)
-            self.current_attenuation = cur_atten
-            return {'data': cur_atten}
+            ret = self.__read_response()
+            if 'error' in ret:
+                self.__log(ret['error'], logging.ERROR)
+            else:
+                self.__log(ret['data'])
+                cur_atten = ret['data']
+                if cur_atten != atten:
+                    self.__log("Attenuation setting not achieved!", logging.ERROR)
+                self.current_attenuation = cur_atten
+                return {'data': cur_atten}
 
         return ret
 
@@ -428,29 +465,21 @@ class Controller:
         """
         # check inputs
         if direction not in ['F', 'B']:
-            self.__log("Invalid direction", logging.ERROR)
+            self.__log("Invalid direction: use F or B", logging.ERROR)
             return {'error': 'Invalid direction'}
 
         ret = self.__send_command(cmd=direction)
         if 'data' in ret:
-            retval = self.__read_position()
-            if 'error' in retval:
-                self.__log(retval['error'], logging.ERROR)
-
-    def __read_position(self):
-        """Read response from stage controller and extract current position"""
-
-        retval = self.__read_response()
-        if 'data' in retval:
-            ret = {}
-            position = self.__extract_position(retval['data'])
-            if position is not None:
-                self.current_position = position
-                ret['data'] = position
+            ret = self.__read_response()
+            if 'error' in ret:
+                self.__log(ret['error'], logging.ERROR)
             else:
-                ret['error'] = "Invalid position"
-        else:
-            ret = retval
+                self.__log(ret['data'])
+                cur_pos = ret['data']
+                if cur_pos != self.current_position:
+                    self.__log("Position setting not achieved!", logging.ERROR)
+                self.current_position = cur_pos
+                return {'data': cur_pos}
         return ret
 
     def get_position(self):
@@ -461,11 +490,12 @@ class Controller:
 
         ret = self.__send_command(cmd="S?")
         if 'data' in ret:
-            retval = self.__read_position()
-            if 'error' in retval:
-                self.__log(retval['error'], logging.ERROR)
+            ret = self.__read_response()
+            if 'error' in ret:
+                self.__log(ret['error'], logging.ERROR)
             else:
-                ret = retval
+                self.__log(ret['data'])
+                self.current_position = ret['data']
         return ret
 
     def reset(self):
@@ -477,8 +507,12 @@ class Controller:
         ret = self.__send_command(cmd="RS")
         time.sleep(2.)
 
-        if 'error' not in ret:
-            self.read_from_controller()
+        if 'data' in ret:
+            ret = self.__read_response()
+            if 'error' in ret:
+                self.__log(ret['error'], logging.ERROR)
+            else:
+                self.__log(ret['data'])
 
         return ret
 
@@ -491,23 +525,20 @@ class Controller:
         ret = self.__send_command(cmd="CD")
 
         if 'data' in ret:
-            retval = self.__read_response()
-            if 'data' in retval:
-                self.configuration = retval['data']
-                ret['data'] = self.configuration
+            ret = self.__read_response()
+            if 'error' in ret:
+                self.__log(ret['error'], logging.ERROR)
             else:
-                ret = retval
+                self.__log(ret['data'])
+                self.configuration = ret['data']
+
         return ret
 
     def initialize_controller(self):
         """ Initialize stage controller. """
         ret = self.home()
-        if 'data' in ret:
-            retval = self.__read_response()
-            if 'data' in retval:
-                ret['data'] = 'intialized'
-            else:
-                ret = retval
+        if 'error' in ret:
+            self.__log(ret['error'], logging.ERROR)
         return ret
 
     def read_from_controller(self):
