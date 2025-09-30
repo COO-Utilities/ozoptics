@@ -235,12 +235,11 @@ class Controller:
             msg_data = str(recv.decode('utf-8'))
         else:
             resp = self.__parse_response(str(recv.decode('utf-8')))
+            msg_data = resp.value
             if resp.type == ResponseType.ERROR:
                 msg_type = 'error'
-                msg_data = resp.value
             else:
                 msg_type = 'data'
-                msg_data = resp.value
 
         return {msg_type: msg_data}
 
@@ -293,15 +292,15 @@ class Controller:
         :return: dictionary {'data|error': string_message}
         """
 
-        # Prep command
-        cmd_send = f"{cmd}\r\n"
-        self.__log("Sending command:%s" % cmd_send)
-        cmd_encoded = cmd_send.encode('utf-8')
-
         # check connection
         if not self.connected:
             msg_text = "Not connected to controller!"
             self.__log(msg_text, logging.ERROR)
+
+        # Prep command
+        cmd_send = f"{cmd}\r\n"
+        self.__log("Sending command:%s" % cmd_send)
+        cmd_encoded = cmd_send.encode('utf-8')
 
         try:
             self.socket.settimeout(30)
