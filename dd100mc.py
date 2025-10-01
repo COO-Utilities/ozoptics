@@ -182,7 +182,7 @@ class Controller:
                 self.__log("Already connected")
                 self.connected = True
             else:
-                self.__log("Connection error: %s" % ex.strerror, logging.ERROR)
+                self.__log(f"Connection error: {ex.strerror}", logging.ERROR)
                 self.connected = False
         # clear socket
         if self.connected:
@@ -197,7 +197,7 @@ class Controller:
             self.__log("Disconnected controller")
             self.connected = False
         except OSError as ex:
-            self.__log("Disconnection error: %s" % ex.strerror, logging.ERROR)
+            self.__log(f"Disconnection error: {ex.strerror}", logging.ERROR)
             self.connected = False
             self.socket = None
 
@@ -227,7 +227,7 @@ class Controller:
             tries -= 1
 
         recv_len = len(recv)
-        self.__log("Return: len = %d, Value = %s" % (recv_len, recv))
+        self.__log(f"Return: len = {recv_len:d}, Value = {recv}")
 
         if b'Done' not in recv:
             self.__log("Read from controller timed out", logging.WARNING)
@@ -299,7 +299,7 @@ class Controller:
 
         # Prep command
         cmd_send = f"{cmd}\r\n"
-        self.__log("Sending command:%s" % cmd_send)
+        self.__log(f"Sending command:{cmd_send}")
         cmd_encoded = cmd_send.encode('utf-8')
 
         try:
@@ -339,7 +339,7 @@ class Controller:
             parameters = "".join(parameters)
             cmd += parameters
 
-        self.__log("Input command: %s" % cmd)
+        self.__log(f"Input command: {cmd}")
 
         # Send serial command
         with self.lock:
@@ -546,7 +546,7 @@ class Controller:
         try:
             recv = self.socket.recv(2048)
             recv_len = len(recv)
-            self.__log("Return: len = %d, Value = %s" % (recv_len, recv))
+            self.__log(f"Return: len = {recv_len:d}, Value = {recv}")
         except BlockingIOError:
             recv = b""
         self.socket.setblocking(True)
@@ -570,4 +570,4 @@ class Controller:
                 output = self.read_from_controller()
                 self.__log(output, logging.INFO)
 
-            self.__log("End: %s" % ret, logging.INFO)
+            self.__log(f"End: {ret}", logging.INFO)
