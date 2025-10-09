@@ -131,25 +131,22 @@ class Controller:
 
         # set up logging
         self.verbose = False
+        self.logger = logging.getLogger(logfile)
+        self.logger.setLevel(logging.INFO)
+        console_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname) - %(message)s')
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
         if log:
             if logfile is None:
                 logfile = __name__.rsplit('.', 1)[-1] + '.log'
-            self.logger = logging.getLogger(logfile)
-            self.logger.setLevel(logging.INFO)
             formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
             )
             file_handler = logging.FileHandler(logfile)
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
-
-            console_formatter = logging.Formatter(
-                '%(asctime)s--%(message)s')
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(console_formatter)
-            self.logger.addHandler(console_handler)
-        else:
-            self.logger = None
 
     def _clear_socket(self):
         """ Clear socket buffer. """
@@ -172,15 +169,15 @@ class Controller:
         while tries > 0 and b'Done' not in recv:
             recv += self.socket.recv(2048)
             if b'Error' in recv:
-                self._log(recv, logging.ERROR)
+                self.logger.error(recv)
                 return {'error': self._return_parse_error(str(recv.decode('utf-8')))}
             tries -= 1
 
         recv_len = len(recv)
-        self._log(f"Return: len = {recv_len:d}, Value = {recv}")
+        self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
 
         if b'Done' not in recv:
-            self._log("Read from controller timed out", logging.WARNING)
+            self.logger.warning("Read from controller timed out")
             msg_type = 'error'
             msg_data = str(recv.decode('utf-8'))
         else:
@@ -201,7 +198,7 @@ class Controller:
             try:
                 pos = int(raw.split('Pos:')[1].split()[0])
             except ValueError:
-                self._log("Error parsing position", logging.ERROR)
+                self.logger.error("Error parsing position")
                 pos = None
         else:
             pos = None
@@ -210,7 +207,7 @@ class Controller:
             try:
                 attn = float(raw.split('Attn:')[1].split()[0])
             except ValueError:
-                self._log("Error parsing attenuation", logging.ERROR)
+                self.logger.error("Error parsing attenuation")
                 attn = None
         else:
             attn = None
@@ -245,11 +242,11 @@ class Controller:
         # check connection
         if not self.connected:
             msg_text = "Not connected to controller!"
-            self._log(msg_text, logging.ERROR)
+            self.logger.error(msg_text)
 
         # Prep command
         cmd_send = f"{cmd}\r\n"
-        self._log(f"Sending command:{cmd_send}")
+        self.logger.debug("Sending command: %s", cmd_send)
         cmd_encoded = cmd_send.encode('utf-8')
 
         try:
@@ -263,7 +260,7 @@ class Controller:
         except socket.error as ex:
             msg_type = 'error'
             msg_text = f"Command send error: {ex.strerror}"
-            self._log(msg_text, logging.ERROR)
+            self.logger.error(msg_text)
 
         return {msg_type: msg_text}
 
@@ -284,12 +281,12 @@ class Controller:
 
         # Check if the command should have parameters
         if cmd in self.parameter_commands and parameters:
-            self._log("Adding parameters")
+            self.logger.debug("Adding parameters")
             parameters = [str(x) for x in parameters]
             parameters = "".join(parameters)
             cmd += parameters
 
-        self._log(f"Input command: {cmd}")
+        self.logger.debug("Input command: %s", cmd)
 
         # Send serial command
         with self.lock:
@@ -335,28 +332,6 @@ class Controller:
         error = error.rstrip()
         return self.error.get(error, "Unknown error")
 
-    def _log(self, message, level=logging.DEBUG):
-        """ output log message
-
-        :param message: String message
-        :param level: Log level
-        """
-        # logging set up
-        if self.logger:
-            self.logger.log(level, message)
-        # logging not set up
-        else:
-            log_type = logging.getLevelName(level)
-            # print everything
-            if self.verbose:
-                print(log_type + ": " + message)
-            # only print warnings or worse
-            else:
-                if level >= logging.WARNING:
-                    print(log_type + ":", message)
-        if level >= logging.WARNING:
-            self.last_error = message
-
     # --- User-Facing Methods
     def set_verbose(self, verbose: bool =True):
         """ Set verbose mode.
@@ -381,15 +356,15 @@ class Controller:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             self.socket.connect((host, port))
-            self._log("Connected to %(host)s:%(port)s" % {'host': host, 'port': port})
+            self.logger.info("Connected to %s:%d", host, port)
             self.connected = True
 
         except OSError as ex:
             if ex.errno == errno.EISCONN:
-                self._log("Already connected")
+                self.logger.debug("Already connected")
                 self.connected = True
             else:
-                self._log(f"Connection error: {ex.strerror}", logging.ERROR)
+                self.logger.error("Connection error: %s", ex.strerror)
                 self.connected = False
         # clear socket
         if self.connected:
@@ -401,10 +376,10 @@ class Controller:
             self.socket.shutdown(socket.SHUT_RDWR)
             self.socket.close()
             self.socket = None
-            self._log("Disconnected controller")
+            self.logger.debug("Disconnected controller")
             self.connected = False
         except OSError as ex:
-            self._log(f"Disconnection error: {ex.strerror}", logging.ERROR)
+            self.logger.error("Disconnection error: %s", ex.strerror)
             self.connected = False
             self.socket = None
 
@@ -421,12 +396,12 @@ class Controller:
             if 'data' in ret:
                 ret = self._read_response()
                 if 'error' in ret:
-                    self._log(ret['error'], logging.ERROR)
+                    self.logger.error(ret['error'])
                 else:
-                    self._log(ret['data'])
+                    self.logger.debug(ret['data'])
                     self.homed = True
             else:
-                self._log(ret['error'], logging.ERROR)
+                self.logger.error(ret['error'])
         else:
             ret = {'data': 'already homed' }
 
@@ -446,12 +421,12 @@ class Controller:
         if 'data' in ret:
             ret = self._read_response()
             if 'error' in ret:
-                self._log(ret['error'], logging.ERROR)
+                self.logger.error(ret['error'])
             else:
-                self._log(ret['data'])
+                self.logger.debug(ret['data'])
                 cur_atten = ret['data']
                 if cur_atten != atten:
-                    self._log("Attenuation setting not achieved!", logging.ERROR)
+                    self.logger.error("Attenuation setting not achieved!")
                 self.current_attenuation = cur_atten
                 return {'data': cur_atten}
 
@@ -465,19 +440,19 @@ class Controller:
         """
         # check inputs
         if direction not in ['F', 'B']:
-            self._log("Invalid direction: use F or B", logging.ERROR)
+            self.logger.error("Invalid direction: use F or B")
             return {'error': 'Invalid direction'}
 
         ret = self._send_command(cmd=direction)
         if 'data' in ret:
             ret = self._read_response()
             if 'error' in ret:
-                self._log(ret['error'], logging.ERROR)
+                self.logger.error(ret['error'])
             else:
-                self._log(ret['data'])
+                self.logger.debug(ret['data'])
                 cur_pos = ret['data']
                 if cur_pos != self.current_position:
-                    self._log("Position setting not achieved!", logging.ERROR)
+                    self.logger.error("Position setting not achieved!")
                 self.current_position = cur_pos
                 return {'data': cur_pos}
         return ret
@@ -492,9 +467,9 @@ class Controller:
         if 'data' in ret:
             ret = self._read_response()
             if 'error' in ret:
-                self._log(ret['error'], logging.ERROR)
+                self.logger.error(ret['error'])
             else:
-                self._log(ret['data'])
+                self.logger.debug(ret['data'])
                 self.current_position = ret['data']
         return ret
 
@@ -510,9 +485,9 @@ class Controller:
         if 'data' in ret:
             ret = self._read_response()
             if 'error' in ret:
-                self._log(ret['error'], logging.ERROR)
+                self.logger.error(ret['error'])
             else:
-                self._log(ret['data'])
+                self.logger.debug(ret['data'])
 
         return ret
 
@@ -527,9 +502,9 @@ class Controller:
         if 'data' in ret:
             ret = self._read_response()
             if 'error' in ret:
-                self._log(ret['error'], logging.ERROR)
+                self.logger.error(ret['error'])
             else:
-                self._log(ret['data'])
+                self.logger.debug(ret['data'])
                 self.configuration = ret['data']
 
         return ret
@@ -538,7 +513,7 @@ class Controller:
         """ Initialize stage controller. """
         ret = self.home()
         if 'error' in ret:
-            self._log(ret['error'], logging.ERROR)
+            self.logger.error(ret['error'])
         return ret
 
     def read_from_controller(self):
@@ -547,7 +522,7 @@ class Controller:
         try:
             recv = self.socket.recv(2048)
             recv_len = len(recv)
-            self._log(f"Return: len = {recv_len:d}, Value = {recv}")
+            self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
         except BlockingIOError:
             recv = b""
         self.socket.setblocking(True)
@@ -569,6 +544,6 @@ class Controller:
             ret = self._send_command(cmd=cmd, custom_command=True)
             if 'error' not in ret:
                 output = self.read_from_controller()
-                self._log(output, logging.INFO)
+                self.logger.info(output)
 
-            self._log(f"End: {ret}", logging.INFO)
+            self.logger.info("End: %s", ret)
