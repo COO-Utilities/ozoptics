@@ -134,7 +134,7 @@ class Controller:
         self.logger = logging.getLogger(logfile)
         self.logger.setLevel(logging.INFO)
         console_formatter = logging.Formatter(
-            '%(asctime)s - %(levelname) - %(message)s')
+            '%(asctime)s - %(levelname)s - %(message)s')
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
