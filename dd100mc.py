@@ -47,13 +47,11 @@ W<n>        - Selects the wavelength using <n>.
 import dataclasses
 import enum
 import errno
-import logging
 import time
 import socket
-import threading
-import sys
 from typing import Union
 
+from hardware_device_base import HardwareDeviceBase
 
 class ResponseType(enum.Enum):
     """Controller response types."""
@@ -71,7 +69,7 @@ class OzResponse:
     value: Union[float, int, str, dict, None]
 
 
-class Controller:
+class OZController(HardwareDeviceBase):
     """
     Controller class for OZ Optics DD-100-MC Attenuator Controller.
     """
@@ -115,38 +113,16 @@ class Controller:
 
         NOTE: default is INFO level logging, use set_verbose to increase verbosity.
         """
-
-        # thread lock
-        self.lock = threading.Lock()
+        super().__init__(log, logfile)
 
         # Set up socket
         self.socket = None
-        self.connected = False
 
         self.current_attenuation = None
         self.current_position = None
         self.configuration = ""
         self.homed = False
         self.last_error = ""
-
-        # set up logging
-        self.verbose = False
-        self.logger = logging.getLogger(logfile)
-        self.logger.setLevel(logging.INFO)
-        console_formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s')
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
-        if log:
-            if logfile is None:
-                logfile = __name__.rsplit('.', 1)[-1] + '.log'
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            file_handler = logging.FileHandler(logfile)
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
 
     def _clear_socket(self):
         """ Clear socket buffer. """
@@ -159,7 +135,7 @@ class Controller:
                     break
             self.socket.setblocking(True)
 
-    def _read_response(self):
+    def _read_reply(self) -> dict:
         """Read the return message from stage controller."""
         # Get return value
         recv = self.socket.recv(2048)
@@ -264,33 +240,33 @@ class Controller:
 
         return {msg_type: msg_text}
 
-    def _send_command(self, cmd="", parameters=None, custom_command=False):
+    def _send_command(self, command: str, *args, custom_command=False) -> dict:
         """
         Send a command to the stage controller
 
-        :param cmd: String, command to send to the stage controller
-        :param parameters: List of string parameters associated with cmd
+        :param command: String, command to send to the stage controller
+        :param *args: List of string parameters associated with cmd
         :param custom_command: Boolean, if true, command is custom
         :return: dictionary {'data|error': string_message}
         """
 
         # verify cmd and stage_id
-        ret = self._verify_send_command(cmd, custom_command)
+        ret = self._verify_send_command(command, custom_command)
         if 'error' in ret:
             return ret
 
         # Check if the command should have parameters
-        if cmd in self.parameter_commands and parameters:
+        if command in self.parameter_commands and args:
             self.logger.debug("Adding parameters")
-            parameters = [str(x) for x in parameters]
+            parameters = [str(x) for x in args]
             parameters = "".join(parameters)
-            cmd += parameters
+            command += parameters
 
-        self.logger.debug("Input command: %s", cmd)
+        self.logger.debug("Input command: %s", command)
 
         # Send serial command
         with self.lock:
-            result = self._send_serial_command(cmd)
+            result = self._send_serial_command(command)
 
         return result
 
@@ -333,42 +309,33 @@ class Controller:
         return self.error.get(error, "Unknown error")
 
     # --- User-Facing Methods
-    def set_verbose(self, verbose: bool =True):
-        """ Set verbose mode.
-
-        :param verbose: Boolean, set to True to enable DEBUG level messages,
-                        False to disable DEBUG level messages
-        """
-        self.verbose = verbose
-        if self.logger:
-            if self.verbose:
-                self.logger.setLevel(logging.DEBUG)
-            else:
-                self.logger.setLevel(logging.INFO)
-
-    def connect(self, host: str =None, port: int =None):
+    def connect(self, *args,  con_type: str="tcp"):
         """ Connect to stage controller.
 
-        :param host: String, host ip address
-        :param port: Int, Port number
+        :param args: for tcp connection, host and port, for serial, port and baudrate
+        :param con_type: tcp or serial
         """
-        if self.socket is None:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            self.socket.connect((host, port))
-            self.logger.info("Connected to %s:%d", host, port)
-            self.connected = True
+        if self.validate_connection_params(args):
+            if con_type == "tcp":
+                host = args[0]
+                port = args[1]
+                if self.socket is None:
+                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    self.socket.connect((host, port))
+                    self.logger.info("Connected to %s:%d", host, port)
+                    self._set_connected(True)
 
-        except OSError as ex:
-            if ex.errno == errno.EISCONN:
-                self.logger.debug("Already connected")
-                self.connected = True
-            else:
-                self.logger.error("Connection error: %s", ex.strerror)
-                self.connected = False
-        # clear socket
-        if self.connected:
-            self._clear_socket()
+                except OSError as ex:
+                    if ex.errno == errno.EISCONN:
+                        self.logger.debug("Already connected")
+                        self._set_connected(True)
+                    else:
+                        self.logger.error("Connection error: %s", ex.strerror)
+                        self._set_connected(False)
+                # clear socket
+                if self.is_connected():
+                    self._clear_socket()
 
     def disconnect(self):
         """ Disconnect stage controller. """
@@ -377,10 +344,10 @@ class Controller:
             self.socket.close()
             self.socket = None
             self.logger.debug("Disconnected controller")
-            self.connected = False
+            self._set_connected(False)
         except OSError as ex:
             self.logger.error("Disconnection error: %s", ex.strerror)
-            self.connected = False
+            self._set_connected(False)
             self.socket = None
 
     def home(self):
@@ -391,10 +358,10 @@ class Controller:
         """
 
         if not self.homed:
-            ret = self._send_command(cmd='H')
+            ret = self._send_command('H')
 
             if 'data' in ret:
-                ret = self._read_response()
+                ret = self._read_reply()
                 if 'error' in ret:
                     self.logger.error(ret['error'])
                 else:
@@ -416,10 +383,10 @@ class Controller:
         """
 
         # Send move to controller
-        ret = self._send_command(cmd="A", parameters=[atten])
+        ret = self._send_command("A", atten)
 
         if 'data' in ret:
-            ret = self._read_response()
+            ret = self._read_reply()
             if 'error' in ret:
                 self.logger.error(ret['error'])
             else:
@@ -443,9 +410,9 @@ class Controller:
             self.logger.error("Invalid direction: use F or B")
             return {'error': 'Invalid direction'}
 
-        ret = self._send_command(cmd=direction)
+        ret = self._send_command(direction)
         if 'data' in ret:
-            ret = self._read_response()
+            ret = self._read_reply()
             if 'error' in ret:
                 self.logger.error(ret['error'])
             else:
@@ -463,9 +430,9 @@ class Controller:
         :return: dictionary {'data|error': current_position|string_message}
         """
 
-        ret = self._send_command(cmd="S?")
+        ret = self._send_command("S?")
         if 'data' in ret:
-            ret = self._read_response()
+            ret = self._read_reply()
             if 'error' in ret:
                 self.logger.error(ret['error'])
             else:
@@ -479,11 +446,11 @@ class Controller:
         :return: return from __send_command
         """
 
-        ret = self._send_command(cmd="RS")
+        ret = self._send_command("RS")
         time.sleep(2.)
 
         if 'data' in ret:
-            ret = self._read_response()
+            ret = self._read_reply()
             if 'error' in ret:
                 self.logger.error(ret['error'])
             else:
@@ -497,10 +464,10 @@ class Controller:
         :return: return from __send_command
         """
 
-        ret = self._send_command(cmd="CD")
+        ret = self._send_command("CD")
 
         if 'data' in ret:
-            ret = self._read_response()
+            ret = self._read_reply()
             if 'error' in ret:
                 self.logger.error(ret['error'])
             else:
@@ -541,7 +508,7 @@ class Controller:
             if not cmd:
                 break
 
-            ret = self._send_command(cmd=cmd, custom_command=True)
+            ret = self._send_command(cmd, custom_command=True)
             if 'error' not in ret:
                 output = self.read_from_controller()
                 self.logger.info(output)
