@@ -173,6 +173,7 @@ class OZController(HardwareDeviceBase):
         if 'Pos:' in raw:
             try:
                 pos = int(raw.split('Pos:')[1].split()[0])
+                self.current_position = pos
             except ValueError:
                 self.logger.error("Error parsing position")
                 pos = None
@@ -182,6 +183,7 @@ class OZController(HardwareDeviceBase):
         if 'Attn:' in raw:
             try:
                 attn = float(raw.split('Attn:')[1].split()[0])
+                self.current_attenuation = attn
             except ValueError:
                 self.logger.error("Error parsing attenuation")
                 attn = None
@@ -309,7 +311,7 @@ class OZController(HardwareDeviceBase):
         return self.error.get(error, "Unknown error")
 
     # --- User-Facing Methods
-    def connect(self, *args,  con_type: str="tcp"):
+    def connect(self, *args,  con_type: str="tcp") -> None:
         """ Connect to stage controller.
 
         :param args: for tcp connection, host and port, for serial, port and baudrate
@@ -336,6 +338,14 @@ class OZController(HardwareDeviceBase):
                 # clear socket
                 if self.is_connected():
                     self._clear_socket()
+            elif con_type == "serial":
+                self.logger.error("Serial connection not implemented")
+                self._set_connected(False)
+            else:
+                self.logger.error("Unknown con_type: %s", con_type)
+                self._set_connected(False)
+        else:
+            self.logger.error("Invalid connection args: %s", args)
 
     def disconnect(self):
         """ Disconnect stage controller. """
@@ -373,6 +383,22 @@ class OZController(HardwareDeviceBase):
             ret = {'data': 'already homed' }
 
         return ret
+
+    def get_atomic_value(self, item: str ="") -> Union[float, int, str, None]:
+        """Return single value for item"""
+        if "pos" in item:
+            result = self.get_position()
+            if 'error' in result:
+                self.logger.error(result['error'])
+                value = None
+            else:
+                value = int(result['data'])
+        elif "attn" in item:
+            value = self.current_attenuation
+        else:
+            self.logger.error("Unknown item: %s, choose pos or attn", item)
+            value = None
+        return value
 
     def set_attenuation(self, atten=None):
         """
