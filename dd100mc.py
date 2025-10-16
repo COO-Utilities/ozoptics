@@ -103,7 +103,7 @@ class OZController(HardwareDeviceBase):
         "Error-7": "Motor voltage exceeds safe limits"
     }
 
-    def __init__(self, log: bool =True, logfile: str =None):
+    def __init__(self, log: bool =True, logfile: str =__name__.rsplit(".", 1)[-1]):
 
         """
         Class to handle communications with the stage controller and any faults
