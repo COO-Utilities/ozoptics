@@ -11,6 +11,15 @@ Low-level python modules for operating OZ Optics attenuators
 - Query attenuator state and parameters
 - Command full range of attenuations
 
+## Requirements
+
+- Install base class from https://github.com/COO-Utilities/hardware_device_base
+
+## Installation
+
+```bash
+pip install .
+```
 
 ## Usage
 
