@@ -55,7 +55,7 @@ from hardware_device_base import HardwareDeviceBase
 
 class ResponseType(enum.Enum):
     """Controller response types."""
-    ATTN = "attenuation"
+    ATTEN = "attenuation"
     POS = "steps"
     BOTH = "attenuation and steps"
     STRING = "string"
@@ -180,27 +180,27 @@ class OZController(HardwareDeviceBase):
         else:
             pos = None
 
-        if 'Attn:' in raw:
+        if 'Atten:' in raw:
             try:
-                attn = float(raw.split('Attn:')[1].split()[0])
-                self.current_attenuation = attn
+                atten = float(raw.split('Atten:')[1].split()[0])
+                self.current_attenuation = atten
             except ValueError:
                 self.logger.error("Error parsing attenuation")
-                attn = None
+                atten = None
         else:
-            attn = None
+            atten = None
 
         # Error case
         if 'Error' in raw:
             return OzResponse(ResponseType.ERROR, raw)
 
         # Both Attenuation and Steps
-        if pos and attn:
-            return OzResponse(ResponseType.BOTH, {"pos": pos, "attn": attn})
+        if pos and atten:
+            return OzResponse(ResponseType.BOTH, {"pos": pos, "atten": atten})
 
         # Attenuation
-        if attn:
-            return OzResponse(ResponseType.ATTN, attn)
+        if atten:
+            return OzResponse(ResponseType.ATTEN, atten)
 
         # Pos
         if pos:
@@ -394,10 +394,10 @@ class OZController(HardwareDeviceBase):
                 value = None
             else:
                 value = int(result['data'])
-        elif "attn" in item:
+        elif "atten" in item:
             value = self.current_attenuation
         else:
-            self.logger.error("Unknown item: %s, choose pos or attn", item)
+            self.logger.error("Unknown item: %s, choose pos or atten", item)
             value = None
         return value
 
