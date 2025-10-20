@@ -182,7 +182,7 @@ class OZController(HardwareDeviceBase):
 
         if 'Atten:' in raw:
             try:
-                atten = float(raw.split('Atten:')[1].split()[0])
+                atten = float(raw.split('Atten:')[1].split('(')[0])
                 self.current_attenuation = atten
             except ValueError:
                 self.logger.error("Error parsing attenuation")
