@@ -467,6 +467,22 @@ class OZController(HardwareDeviceBase):
                 self.current_position = ret['data']
         return ret
 
+    def get_attenuation(self):
+        """ Current attenuation
+
+        :return: dictionary {'data|error': current_attenuation|string_message}
+        """
+
+        ret = self._send_command("A?")
+        if 'data' in ret:
+            ret = self._read_reply()
+            if 'error' in ret:
+                self.logger.error(ret['error'])
+            else:
+                self.logger.debug(ret['data'])
+                self.current_attenuation = ret['data']
+        return ret
+
     def reset(self):
         """ Reset stage
 
