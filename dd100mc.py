@@ -182,7 +182,8 @@ class OZController(HardwareDeviceBase):
 
         if 'Atten:' in raw:
             try:
-                atten = float(raw.split('Atten:')[1].split('(')[0])
+                value_string = raw.split('Atten:')[1].split('(')[0]
+                atten = float(value_string)
                 self.current_attenuation = atten
             except ValueError:
                 self.logger.error("Error parsing attenuation")
@@ -347,6 +348,9 @@ class OZController(HardwareDeviceBase):
         else:
             self.logger.error("Invalid connection args: %s", args)
             self._set_connected(False)
+        if self.is_connected():
+            reply = self._read_reply()
+            print(reply)
 
     def disconnect(self):
         """ Disconnect stage controller. """
