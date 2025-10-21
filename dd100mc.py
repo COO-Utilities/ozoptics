@@ -442,7 +442,7 @@ class OZController(HardwareDeviceBase):
         :return: dictionary {'data|error': current_attenuation|string_message}
         """
         # check attenuation limits
-        if atten < 0.0 or atten > 60.0:
+        if atten < 0.0 or atten > 60.0 or atten is None:
             self.logger.error("Invalid attenuation: %s, cannot be < 0. or > 60.", atten)
             return {'error': 'Invalid attenuation'}
 
