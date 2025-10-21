@@ -465,7 +465,7 @@ class OZController(HardwareDeviceBase):
                 self.logger.error(ret['error'])
             else:
                 self.logger.debug(ret['data'])
-                self.current_position = ret['data']
+                # self.current_position = ret['data']
         return ret
 
     def get_attenuation(self):
@@ -481,7 +481,7 @@ class OZController(HardwareDeviceBase):
                 self.logger.error(ret['error'])
             else:
                 self.logger.debug(ret['data'])
-                self.current_attenuation = ret['data']
+                # self.current_attenuation = ret['data']
         return ret
 
     def reset(self):
