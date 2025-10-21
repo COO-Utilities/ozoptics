@@ -434,15 +434,15 @@ class OZController(HardwareDeviceBase):
             value = None
         return value
 
-    def set_attenuation(self, atten=None):
+    def set_attenuation(self, atten: float=None):
         """
         Move stage to input attenuation and return when in position
 
-        :param atten: Float, absolute attenuation in fraction
+        :param atten: Float, absolute attenuation in dB (0. - 60.)
         :return: dictionary {'data|error': current_attenuation|string_message}
         """
         # check attenuation limits
-        if atten < 0 or atten > 60:
+        if atten < 0.0 or atten > 60.0:
             self.logger.error("Invalid attenuation: %s, cannot be < 0. or > 60.", atten)
             return {'error': 'Invalid attenuation'}
 
