@@ -409,7 +409,7 @@ class OZController(HardwareDeviceBase):
 
     def set_attenuation(self, atten=None):
         """
-        Move stage to absolute position and return when in position
+        Move stage to input attenuation and return when in position
 
         :param atten: Float, absolute attenuation in fraction
         :return: dictionary {'data|error': current_attenuation|string_message}
@@ -423,12 +423,37 @@ class OZController(HardwareDeviceBase):
             if 'error' in ret:
                 self.logger.error(ret['error'])
             else:
-                self.logger.debug(ret['data'])
-                cur_atten = ret['data']
+                time.sleep(0.5)
+                cur_atten = self.get_attenuation()
+                self.logger.debug(cur_atten)
                 if cur_atten != atten:
                     self.logger.error("Attenuation setting not achieved!")
-                self.current_attenuation = cur_atten
                 return {'data': cur_atten}
+
+        return ret
+
+    def set_position(self, pos=None):
+        """
+        Move stage to absolute position and return when in position
+
+        :param pos: Int, absolute position in steps
+        :return: dictionary {'data|error': current_attenuation|string_message}
+        """
+
+        # Send move to controller
+        ret = self._send_command("S", pos)
+
+        if 'data' in ret:
+            ret = self._read_reply()
+            if 'error' in ret:
+                self.logger.error(ret['error'])
+            else:
+                time.sleep(0.5)
+                cur_pos = self.get_position()
+                self.logger.debug(cur_pos)
+                if cur_pos != pos:
+                    self.logger.error("Position not achieved!")
+                return {'data': cur_pos}
 
         return ret
 
