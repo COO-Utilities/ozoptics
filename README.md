@@ -9,7 +9,7 @@ Low-level python modules for operating OZ Optics attenuators
 ## Features
 - Connect to OZ Optics attenuators over serial through a terminal server
 - Query attenuator state and parameters
-- Command full range of attenuations
+- Command full range of attenuation values
 
 ## Requirements
 
@@ -29,10 +29,12 @@ import dd100mc
 controller = dd100mc.Controller()
 controller.connect(host='192.168.29.222', port=10010)
 
+controller.set_attenuation(36.5)
 print(controller.get_attenuation())
+controller.set_position(5750)
 print(controller.get_position())
 
-# For a comprehensize list of classes and methods, use the help function
+# For a comprehensive list of classes and methods, use the help function
 help(dd100mc)
 ```
 

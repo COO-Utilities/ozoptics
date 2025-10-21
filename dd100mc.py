@@ -441,6 +441,10 @@ class OZController(HardwareDeviceBase):
         :param atten: Float, absolute attenuation in fraction
         :return: dictionary {'data|error': current_attenuation|string_message}
         """
+        # check attenuation limits
+        if atten < 0 or atten > 60:
+            self.logger.error("Invalid attenuation: %s, cannot be < 0. or > 60.", atten)
+            return {'error': 'Invalid attenuation'}
 
         # Send move to controller
         ret = self._send_command("A", atten)
