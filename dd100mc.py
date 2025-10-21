@@ -449,7 +449,7 @@ class OZController(HardwareDeviceBase):
                 self.logger.error(ret['error'])
             else:
                 time.sleep(0.5)
-                cur_pos = self.get_position()['data']
+                cur_pos = ret['data']
                 self.logger.debug(cur_pos)
                 if cur_pos != pos:
                     self.logger.error("Position not achieved!")
