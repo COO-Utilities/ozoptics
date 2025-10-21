@@ -174,42 +174,42 @@ class OZController(HardwareDeviceBase):
             try:
                 pos = int(raw.split('Pos:')[1].split()[0])
                 self.current_position = pos
-                pos_type = True
+                pos_read = True
             except ValueError:
                 self.logger.error("Error parsing position")
                 pos = None
-                pos_type = False
+                pos_read = False
         else:
             pos = None
-            pos_type = False
+            pos_read = False
 
         if 'Atten:' in raw:
             try:
                 atten = float(raw.split('Atten:')[1].split('(')[0])
                 self.current_attenuation = atten
-                atten_type = True
+                atten_read = True
             except ValueError:
                 self.logger.error("Error parsing attenuation")
                 atten = None
-                atten_type = False
+                atten_read = False
         else:
             atten = None
-            atten_type = False
+            atten_read = False
 
         # Error case
         if 'Error' in raw:
             return OzResponse(ResponseType.ERROR, raw)
 
         # Both Attenuation and Steps
-        if pos_type and atten_type:
+        if pos_read and atten_read:
             return OzResponse(ResponseType.BOTH, {"pos": pos, "atten": atten})
 
         # Attenuation
-        if atten_type:
+        if atten_read:
             return OzResponse(ResponseType.ATTEN, atten)
 
         # Pos
-        if pos_type:
+        if pos_read:
             return OzResponse(ResponseType.POS, pos)
 
         # Default to string

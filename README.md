@@ -29,6 +29,9 @@ import dd100mc
 controller = dd100mc.Controller()
 controller.connect(host='192.168.29.222', port=10010)
 
+print(controller.get_attenuation())
+print(controller.get_position())
+
 # For a comprehensize list of classes and methods, use the help function
 help(dd100mc)
 ```
