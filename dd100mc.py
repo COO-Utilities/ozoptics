@@ -57,6 +57,7 @@ class ResponseType(enum.Enum):
     """Controller response types."""
     ATTEN = "attenuation"
     POS = "steps"
+    DIFF = "diff"
     BOTH = "attenuation and steps"
     STRING = "string"
     ERROR = "error"
@@ -120,6 +121,7 @@ class OZController(HardwareDeviceBase):
 
         self.current_attenuation = None
         self.current_position = None
+        self.current_diff = None
         self.configuration = ""
         self.homed = False
         self.last_error = ""
@@ -168,6 +170,7 @@ class OZController(HardwareDeviceBase):
 
     def _parse_response(self, raw: str) -> OzResponse:
         """Parse the response from stage controller."""
+        # pylint: disable=too-many-branches
         raw = raw.strip()
 
         if 'Pos:' in raw:
@@ -196,6 +199,20 @@ class OZController(HardwareDeviceBase):
             atten = None
             atten_read = False
 
+        # Diff (after homing)
+        if 'Diff=' in raw:
+            try:
+                diff = float(raw.split('Diff=')[1].split()[0])
+                self.current_diff = diff
+                diff_read = True
+            except ValueError:
+                self.logger.error("Error parsing diff")
+                diff = None
+                diff_read = False
+        else:
+            diff = None
+            diff_read = False
+
         # Error case
         if 'Error' in raw:
             return OzResponse(ResponseType.ERROR, raw)
@@ -211,6 +228,9 @@ class OZController(HardwareDeviceBase):
         # Pos
         if pos_read:
             return OzResponse(ResponseType.POS, pos)
+
+        if diff_read:
+            return OzResponse(ResponseType.DIFF, diff)
 
         # Default to string
         return OzResponse(ResponseType.STRING, raw)
