@@ -174,37 +174,42 @@ class OZController(HardwareDeviceBase):
             try:
                 pos = int(raw.split('Pos:')[1].split()[0])
                 self.current_position = pos
+                pos_type = True
             except ValueError:
                 self.logger.error("Error parsing position")
                 pos = None
+                pos_type = False
         else:
             pos = None
+            pos_type = False
 
         if 'Atten:' in raw:
             try:
-                value_string = raw.split('Atten:')[1].split('(')[0]
-                atten = float(value_string)
+                atten = float(raw.split('Atten:')[1].split('(')[0])
                 self.current_attenuation = atten
+                atten_type = True
             except ValueError:
                 self.logger.error("Error parsing attenuation")
                 atten = None
+                atten_type = False
         else:
             atten = None
+            atten_type = False
 
         # Error case
         if 'Error' in raw:
             return OzResponse(ResponseType.ERROR, raw)
 
         # Both Attenuation and Steps
-        if pos and atten:
+        if pos_type and atten_type:
             return OzResponse(ResponseType.BOTH, {"pos": pos, "atten": atten})
 
         # Attenuation
-        if atten:
+        if atten_type:
             return OzResponse(ResponseType.ATTEN, atten)
 
         # Pos
-        if pos:
+        if pos_type:
             return OzResponse(ResponseType.POS, pos)
 
         # Default to string
@@ -465,7 +470,6 @@ class OZController(HardwareDeviceBase):
                 self.logger.error(ret['error'])
             else:
                 self.logger.debug(ret['data'])
-                # self.current_position = ret['data']
         return ret
 
     def get_attenuation(self):
@@ -481,7 +485,6 @@ class OZController(HardwareDeviceBase):
                 self.logger.error(ret['error'])
             else:
                 self.logger.debug(ret['data'])
-                # self.current_attenuation = ret['data']
         return ret
 
     def reset(self):
