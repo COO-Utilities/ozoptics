@@ -480,6 +480,7 @@ class OZController(HardwareDeviceBase):
                 self.logger.debug(cur_pos)
                 if cur_pos != pos:
                     self.logger.error("Position not achieved!")
+                self.get_attenuation()
                 return {'data': cur_pos}
 
         return ret
@@ -490,12 +491,13 @@ class OZController(HardwareDeviceBase):
         :param direction: String, 'F' - forward or 'B' - backward
         :return: dictionary {'data|error': current_position|string_message}
         """
+        direc = direction.upper()
         # check inputs
-        if direction not in ['F', 'B']:
+        if direc not in ['F', 'B']:
             self.logger.error("Invalid direction: use F or B")
             return {'error': 'Invalid direction'}
 
-        ret = self._send_command(direction)
+        ret = self._send_command(direc)
         if 'data' in ret:
             ret = self._read_reply()
             if 'error' in ret:
@@ -505,7 +507,7 @@ class OZController(HardwareDeviceBase):
                 cur_pos = ret['data']
                 if cur_pos != self.current_position:
                     self.logger.error("Position setting not achieved!")
-                self.current_position = cur_pos
+                    self.current_position = cur_pos
                 return {'data': cur_pos}
         return ret
 
