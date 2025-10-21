@@ -188,7 +188,10 @@ class OZController(HardwareDeviceBase):
 
         if 'Atten:' in raw:
             try:
-                atten = float(raw.split('Atten:')[1].split('(')[0])
+                if 'unknown' in raw:
+                    atten = None
+                else:
+                    atten = float(raw.split('Atten:')[1].split('(')[0])
                 self.current_attenuation = atten
                 atten_read = True
             except ValueError:
@@ -204,6 +207,7 @@ class OZController(HardwareDeviceBase):
             try:
                 diff = float(raw.split('Diff=')[1].split()[0])
                 self.current_diff = diff
+                self.current_position = 0
                 diff_read = True
             except ValueError:
                 self.logger.error("Error parsing diff")
@@ -229,6 +233,7 @@ class OZController(HardwareDeviceBase):
         if pos_read:
             return OzResponse(ResponseType.POS, pos)
 
+        # Diff (after homing)
         if diff_read:
             return OzResponse(ResponseType.DIFF, diff)
 
@@ -396,6 +401,8 @@ class OZController(HardwareDeviceBase):
 
         if not self.homed:
             ret = self._send_command('H')
+            self.current_attenuation = None
+            self.current_position = None
 
             if 'data' in ret:
                 ret = self._read_reply()
