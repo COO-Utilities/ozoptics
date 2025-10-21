@@ -348,9 +348,6 @@ class OZController(HardwareDeviceBase):
         else:
             self.logger.error("Invalid connection args: %s", args)
             self._set_connected(False)
-        if self.is_connected():
-            reply = self._read_reply()
-            print(reply)
 
     def disconnect(self):
         """ Disconnect stage controller. """
