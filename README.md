@@ -26,8 +26,8 @@ pip install .
 ```python
 import dd100mc
 
-controller = dd100mc.Controller()
-controller.connect(host='192.168.29.222', port=10010)
+controller = dd100mc.OZController()
+controller.connect(host='192.168.29.153', port=10001)
 
 controller.set_attenuation(36.5)
 print(controller.get_attenuation())
