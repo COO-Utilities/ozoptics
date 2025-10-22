@@ -27,7 +27,7 @@ pip install .
 import dd100mc
 
 controller = dd100mc.OZController()
-controller.connect(host='192.168.29.153', port=10001)
+controller.connect('192.168.29.153', 10001)
 
 controller.set_attenuation(36.5)
 print(controller.get_attenuation())
@@ -44,5 +44,5 @@ Unit tests are located in `tests/` directory.
 To run all tests from the project root:
 
 ```bash
-pytest
+python -m pytest
 ```
