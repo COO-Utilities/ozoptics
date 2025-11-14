@@ -27,7 +27,7 @@ pip install .
 import dd100mc
 
 controller = dd100mc.OZController()
-controller.connect('192.168.29.153', 10001)
+controller.connect(host='192.168.29.153', port=10003)
 
 controller.set_attenuation(36.5)
 print(controller.get_attenuation())
@@ -46,3 +46,4 @@ To run all tests from the project root:
 ```bash
 python -m pytest
 ```
+
