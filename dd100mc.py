@@ -428,7 +428,12 @@ class OZController(HardwareDeviceBase):
             else:
                 value = int(result['data'])
         elif "atten" in item:
-            value = self.current_attenuation
+            result = self.get_attenuation()
+            if 'error' in result:
+                self.logger.error(result['error'])
+                value = None
+            else:
+                value = float(result['data'])
         else:
             self.logger.error("Unknown item: %s, choose pos or atten", item)
             value = None
