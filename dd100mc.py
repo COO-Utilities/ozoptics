@@ -51,7 +51,7 @@ import time
 import socket
 from typing import Union
 
-from hardware_device_base import HardwareDeviceBase
+from hardware_device_base.hardware_motion_base import HardwareMotionBase
 
 class ResponseType(enum.Enum):
     """Controller response types."""
@@ -70,7 +70,7 @@ class OzResponse:
     value: Union[float, int, str, dict, None]
 
 
-class OZController(HardwareDeviceBase):
+class OZController(HardwareMotionBase):
     """
     Controller class for OZ Optics DD-100-MC Attenuator Controller.
     """
@@ -147,7 +147,7 @@ class OZController(HardwareDeviceBase):
         while tries > 0 and b'Done' not in recv:
             recv += self.socket.recv(2048)
             if b'Error' in recv:
-                self.logger.error(recv)
+                self.report_error(recv.decode('utf-8'))
                 return {'error': self._return_parse_error(str(recv.decode('utf-8')))}
             tries -= 1
 
@@ -155,7 +155,7 @@ class OZController(HardwareDeviceBase):
         self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
 
         if b'Done' not in recv:
-            self.logger.warning("Read from controller timed out")
+            self.report_error("Read from controller timed out")
             msg_type = 'error'
             msg_data = str(recv.decode('utf-8'))
         else:
@@ -179,7 +179,7 @@ class OZController(HardwareDeviceBase):
                 self.current_position = pos
                 pos_read = True
             except ValueError:
-                self.logger.error("Error parsing position")
+                self.report_error("Error parsing position")
                 pos = None
                 pos_read = False
         else:
@@ -195,7 +195,7 @@ class OZController(HardwareDeviceBase):
                 self.current_attenuation = atten
                 atten_read = True
             except ValueError:
-                self.logger.error("Error parsing attenuation")
+                self.report_error("Error parsing attenuation")
                 atten = None
                 atten_read = False
         else:
@@ -210,7 +210,7 @@ class OZController(HardwareDeviceBase):
                 self.current_position = 0
                 diff_read = True
             except ValueError:
-                self.logger.error("Error parsing diff")
+                self.report_error("Error parsing diff")
                 diff = None
                 diff_read = False
         else:
@@ -251,7 +251,7 @@ class OZController(HardwareDeviceBase):
         # check connection
         if not self.connected:
             msg_text = "Not connected to controller!"
-            self.logger.error(msg_text)
+            self.report_error(msg_text)
 
         # Prep command
         cmd_send = f"{cmd}\r\n"
@@ -274,6 +274,7 @@ class OZController(HardwareDeviceBase):
         return {msg_type: msg_text}
 
     def _send_command(self, command: str, *args, custom_command=False) -> dict:
+        # pylint: disable=W0221
         """
         Send a command to the stage controller
 
@@ -342,57 +343,60 @@ class OZController(HardwareDeviceBase):
         return self.error.get(error, "Unknown error")
 
     # --- User-Facing Methods
-    def connect(self, *args,  con_type: str="tcp") -> None:
+    def connect(self, host, port,  con_type: str="tcp") -> None:  # pylint: disable=W0221
         """ Connect to stage controller.
 
-        :param args: for tcp connection, host and port, for serial, port and baudrate
-        :param con_type: tcp or serial
+        :param host: String, for tcp connection, host (name or IP)
+        :param port: Int, for tcp connection, port
+        :param con_type: String, tcp or serial (tcp only supported)
         """
-        if self.validate_connection_params(args):
+        if self.validate_connection_params((host, port)):
             if con_type == "tcp":
-                host = args[0]
-                port = args[1]
                 if self.socket is None:
                     self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
                     self.socket.connect((host, port))
-                    self.logger.info("Connected to %s:%d", host, port)
+                    self.report_info(f"Connected to {host}:{port}")
                     self._set_connected(True)
 
                 except OSError as ex:
                     if ex.errno == errno.EISCONN:
-                        self.logger.debug("Already connected")
+                        self.report_info("Already connected")
                         self._set_connected(True)
                     else:
-                        self.logger.error("Connection error: %s", ex.strerror)
+                        self.report_error(f"Connection error: {ex.strerror}")
                         self._set_connected(False)
                 # clear socket
                 if self.is_connected():
                     self._clear_socket()
             elif con_type == "serial":
-                self.logger.error("Serial connection not implemented")
+                self.report_error("Serial connection not implemented")
                 self._set_connected(False)
             else:
-                self.logger.error("Unknown con_type: %s", con_type)
+                self.report_error(f"Unknown con_type: {con_type}")
                 self._set_connected(False)
         else:
-            self.logger.error("Invalid connection args: %s", args)
+            self.report_error(f"Invalid connection args: {host}:{port}")
             self._set_connected(False)
 
     def disconnect(self):
         """ Disconnect stage controller. """
+        if not self.is_connected():
+            self.report_warning("Already disconnected from device")
+            return
         try:
+            self.logger.info("Disconnecting from stage controller")
             self.socket.shutdown(socket.SHUT_RDWR)
             self.socket.close()
             self.socket = None
-            self.logger.debug("Disconnected controller")
             self._set_connected(False)
+            self.report_info("Disconnected from stage controller")
         except OSError as ex:
-            self.logger.error("Disconnection error: %s", ex.strerror)
+            self.report_error(f"Disconnection error: {ex.strerror}")
             self._set_connected(False)
             self.socket = None
 
-    def home(self):
+    def home(self) -> bool:
         """
         Home the stage
 
@@ -407,16 +411,18 @@ class OZController(HardwareDeviceBase):
             if 'data' in ret:
                 ret = self._read_reply()
                 if 'error' in ret:
-                    self.logger.error(ret['error'])
+                    self.report_error(ret['error'])
                 else:
                     self.logger.debug(ret['data'])
                     self.homed = True
             else:
-                self.logger.error(ret['error'])
-        else:
-            ret = {'data': 'already homed' }
+                self.report_error(ret['error'])
 
-        return ret
+        return self.homed
+
+    def is_homed(self) -> bool:
+        """ Has the stage controller been homed?"""
+        return self.homed
 
     def get_atomic_value(self, item: str ="") -> Union[float, int, str, None]:
         """Return single value for item"""
@@ -568,7 +574,7 @@ class OZController(HardwareDeviceBase):
 
         return ret
 
-    def get_params(self):
+    def get_params(self) -> dict:
         """ Get stage parameters
 
         :return: return from __send_command
@@ -579,21 +585,20 @@ class OZController(HardwareDeviceBase):
         if 'data' in ret:
             ret = self._read_reply()
             if 'error' in ret:
-                self.logger.error(ret['error'])
+                self.report_error(ret['error'])
             else:
                 self.logger.debug(ret['data'])
                 self.configuration = ret['data']
 
         return ret
 
-    def initialize_controller(self):
+    def initialize(self) -> bool:
         """ Initialize stage controller. """
-        ret = self.home()
-        if 'error' in ret:
-            self.logger.error(ret['error'])
-        return ret
+        if not self.home():
+            self.report_error("Failed to initialize controller")
+        return self.homed
 
-    def read_from_controller(self):
+    def read_from_controller(self) -> str:
         """ Read from controller"""
         self.socket.setblocking(False)
         try:
