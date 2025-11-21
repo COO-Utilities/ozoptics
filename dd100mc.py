@@ -51,7 +51,7 @@ import time
 import socket
 from typing import Union
 
-from hardware_device_base.hardware_motion_base import HardwareMotionBase
+from hardware_device_base import HardwareMotionBase
 
 class ResponseType(enum.Enum):
     """Controller response types."""
