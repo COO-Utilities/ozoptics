@@ -49,7 +49,7 @@ import enum
 import errno
 import time
 import socket
-from typing import Union
+from typing import Union, Dict, Tuple
 
 from hardware_device_base import HardwareMotionBase
 
@@ -427,7 +427,7 @@ class OZController(HardwareMotionBase):
     def get_atomic_value(self, item: str ="") -> Union[float, int, str, None]:
         """Return single value for item"""
         if "pos" in item:
-            result = self.get_position()
+            result = self.get_pos()
             if 'error' in result:
                 self.logger.error(result['error'])
                 value = None
@@ -474,7 +474,7 @@ class OZController(HardwareMotionBase):
 
         return ret
 
-    def set_position(self, pos=None):
+    def set_pos(self, pos=None):  # pylint: disable=W0221
         """
         Move stage to absolute position and return when in position
 
@@ -526,7 +526,7 @@ class OZController(HardwareMotionBase):
                 return {'data': cur_pos}
         return ret
 
-    def get_position(self):
+    def get_pos(self) -> Dict:  # pylint: disable=W0221
         """ Current position
 
         :return: dictionary {'data|error': current_position|string_message}
@@ -629,3 +629,15 @@ class OZController(HardwareMotionBase):
                 self.logger.info(output)
 
             self.logger.info("End: %s", ret)
+
+    def close_loop(self) -> bool:
+        """ Close loop"""
+        return True
+
+    def is_loop_closed(self) -> bool:
+        """ Check if loop is closed"""
+        return True
+
+    def get_limits(self) -> Union[Dict[str, Tuple[float, float]], None]:
+        """ Get stage limits"""
+        return None
