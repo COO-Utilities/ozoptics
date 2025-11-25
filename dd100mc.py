@@ -137,7 +137,7 @@ class OZController(HardwareMotionBase):
                     break
             self.socket.setblocking(True)
 
-    def _read_reply(self) -> dict:
+    def _read_reply(self) -> Union[OzResponse.value, None]:
         """Read the return message from stage controller."""
         # Get return value
         recv = self.socket.recv(2048)
@@ -148,25 +148,24 @@ class OZController(HardwareMotionBase):
             recv += self.socket.recv(2048)
             if b'Error' in recv:
                 self.report_error(recv.decode('utf-8'))
-                return {'error': self._return_parse_error(str(recv.decode('utf-8')))}
+                return None
             tries -= 1
 
         recv_len = len(recv)
         self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
 
         if b'Done' not in recv:
-            self.report_error("Read from controller timed out")
-            msg_type = 'error'
             msg_data = str(recv.decode('utf-8'))
-        else:
-            resp = self._parse_response(str(recv.decode('utf-8')))
-            msg_data = resp.value
-            if resp.type == ResponseType.ERROR:
-                msg_type = 'error'
-            else:
-                msg_type = 'data'
+            self.report_error(f"Read from controller timed out: {msg_data}")
+            return None
 
-        return {msg_type: msg_data}
+        resp = self._parse_response(str(recv.decode('utf-8')))
+        msg_data = resp.value
+        if resp.type == ResponseType.ERROR:
+            self.report_error(resp.value)
+            return None
+
+        return msg_data
 
     def _parse_response(self, raw: str) -> OzResponse:
         """Parse the response from stage controller."""
