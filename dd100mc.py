@@ -137,7 +137,7 @@ class OZController(HardwareMotionBase):
                     break
             self.socket.setblocking(True)
 
-    def _read_reply(self) -> dict:
+    def _read_reply(self) -> Union[OzResponse, None]:
         """Read the return message from stage controller."""
         # Get return value
         recv = self.socket.recv(2048)
@@ -148,25 +148,23 @@ class OZController(HardwareMotionBase):
             recv += self.socket.recv(2048)
             if b'Error' in recv:
                 self.report_error(recv.decode('utf-8'))
-                return {'error': self._return_parse_error(str(recv.decode('utf-8')))}
+                error_string = self._return_parse_error(str(recv.decode('utf-8')))
+                return OzResponse(ResponseType.ERROR, error_string)
             tries -= 1
 
         recv_len = len(recv)
         self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
 
         if b'Done' not in recv:
-            self.report_error("Read from controller timed out")
-            msg_type = 'error'
             msg_data = str(recv.decode('utf-8'))
-        else:
-            resp = self._parse_response(str(recv.decode('utf-8')))
-            msg_data = resp.value
-            if resp.type == ResponseType.ERROR:
-                msg_type = 'error'
-            else:
-                msg_type = 'data'
+            self.report_error(f"Read from controller timed out: {msg_data}")
+            return None
 
-        return {msg_type: msg_data}
+        resp = self._parse_response(str(recv.decode('utf-8')))
+        if resp.type == ResponseType.ERROR:
+            self.report_error(resp.value)
+
+        return resp
 
     def _parse_response(self, raw: str) -> OzResponse:
         """Parse the response from stage controller."""
@@ -217,9 +215,10 @@ class OZController(HardwareMotionBase):
             diff = None
             diff_read = False
 
-        # Error case
-        if 'Error' in raw:
-            return OzResponse(ResponseType.ERROR, raw)
+        # Error cases
+        if 'Error' in raw or self.status < 0:
+            error_string = raw if self.status >= 0 else self.status_string
+            return OzResponse(ResponseType.ERROR, error_string)
 
         # Both Attenuation and Steps
         if pos_read and atten_read:
@@ -240,7 +239,7 @@ class OZController(HardwareMotionBase):
         # Default to string
         return OzResponse(ResponseType.STRING, raw)
 
-    def _send_serial_command(self, cmd=''):
+    def _send_serial_command(self, cmd='') -> bool:
         """
         Send serial command to stage controller
 
@@ -252,6 +251,7 @@ class OZController(HardwareMotionBase):
         if not self.connected:
             msg_text = "Not connected to controller!"
             self.report_error(msg_text)
+            return False
 
         # Prep command
         cmd_send = f"{cmd}\r\n"
@@ -263,17 +263,13 @@ class OZController(HardwareMotionBase):
             # Send command
             self.socket.send(cmd_encoded)
             time.sleep(.05)
-            msg_type = 'data'
-            msg_text = 'Command sent successfully'
+            return True
 
         except socket.error as ex:
-            msg_type = 'error'
-            msg_text = f"Command send error: {ex.strerror}"
-            self.logger.error(msg_text)
+            self.report_error(f"Command send error: {ex.strerror}")
+            return False
 
-        return {msg_type: msg_text}
-
-    def _send_command(self, command: str, *args, custom_command=False) -> dict:
+    def _send_command(self, command: str, *args, custom_command=False) -> bool:
         # pylint: disable=W0221
         """
         Send a command to the stage controller
@@ -285,9 +281,8 @@ class OZController(HardwareMotionBase):
         """
 
         # verify cmd and stage_id
-        ret = self._verify_send_command(command, custom_command)
-        if 'error' in ret:
-            return ret
+        if not self._verify_send_command(command, custom_command):
+            return False
 
         # Check if the command should have parameters
         if command in self.parameter_commands and args:
@@ -304,7 +299,7 @@ class OZController(HardwareMotionBase):
 
         return result
 
-    def _verify_send_command(self, cmd, custom_command=False):
+    def _verify_send_command(self, cmd, custom_command=False) -> bool:
         """ Verify cmd and stage_id
 
         :param cmd: String, command to send to the stage controller
@@ -312,24 +307,19 @@ class OZController(HardwareMotionBase):
         :return: dictionary {'data|error': string_message}"""
 
         # Do we have a connection?
-        if not self.connected:
-            msg_type = 'error'
-            msg_text = 'Not connected to controller'
+        if not self.is_connected():
+            self.report_error('Not connected to controller')
+            return False
 
-        else:
-            # Do we have a legal command?
-            if cmd.rstrip().upper() in self.controller_commands:
-                msg_type = 'data'
-                msg_text = f"{cmd} is a valid or custom command"
-            else:
-                if not custom_command:
-                    msg_type = 'error'
-                    msg_text = f"{cmd} is not a valid command"
-                else:
-                    msg_type = 'data'
-                    msg_text = f"{cmd} is a custom command"
-
-        return {msg_type: msg_text}
+        # Do we have a legal command?
+        if cmd.rstrip().upper() in self.controller_commands:
+            self.report_info(f"{cmd} is a valid command")
+            return True
+        if not custom_command:
+            self.report_error(f"{cmd} is not a valid command")
+            return False
+        self.report_info(f"{cmd} is a custom command")
+        return True
 
     def _return_parse_error(self, error=""):
         """
@@ -400,23 +390,20 @@ class OZController(HardwareMotionBase):
         """
         Home the stage
 
-        :return: return from __send_command
+        :return: True if home was successful, False otherwise
         """
-
-        if not self.homed:
-            ret = self._send_command('H')
-            self.current_attenuation = None
-            self.current_position = None
-
-            if 'data' in ret:
-                ret = self._read_reply()
-                if 'error' in ret:
-                    self.report_error(ret['error'])
-                else:
-                    self.logger.debug(ret['data'])
+        if not self.is_homed():
+            if self._send_command('H'):
+                self.current_attenuation = None
+                self.current_position = None
+                resp = self._read_reply()
+                if resp.type == ResponseType.DIFF:
                     self.homed = True
-            else:
-                self.report_error(ret['error'])
+                    self.logger.debug(resp.value)
+                elif resp.type == ResponseType.ERROR:
+                    self.report_error(resp.value)
+        else:
+            self.report_warning("Already homed.")
 
         return self.homed
 
@@ -428,51 +415,53 @@ class OZController(HardwareMotionBase):
         """Return single value for item"""
         if "pos" in item:
             result = self.get_pos()
-            if 'error' in result:
-                self.logger.error(result['error'])
+            if result is None:
+                self.report_error("Failed to get position")
                 value = None
             else:
-                value = int(result['data'])
+                value = int(result)
         elif "atten" in item:
             result = self.get_attenuation()
-            if 'error' in result:
-                self.logger.error(result['error'])
+            if result is None:
+                self.report_error("Failed to get attenuation")
                 value = None
             else:
-                value = float(result['data'])
+                value = float(result)
         else:
             self.logger.error("Unknown item: %s, choose pos or atten", item)
             value = None
         return value
 
-    def set_attenuation(self, atten: float=None):
+    def set_attenuation(self, atten: float=None) -> bool:
         """
         Move stage to input attenuation and return when in position
 
         :param atten: Float, absolute attenuation in dB (0. - 60.)
-        :return: dictionary {'data|error': current_attenuation|string_message}
+        :return: True if successful, False otherwise
         """
         # check attenuation limits
         if atten is None or atten < 0.0 or atten > 60.0:
-            self.logger.error("Invalid attenuation: %s, cannot be < 0. or > 60.", atten)
-            return {'error': 'Invalid attenuation'}
+            self.report_error(f"Invalid attenuation: {atten}, cannot be < 0. or > 60.")
+            return False
 
         # Send move to controller
-        ret = self._send_command("A", atten)
-
-        if 'data' in ret:
-            ret = self._read_reply()
-            if 'error' in ret:
-                self.logger.error(ret['error'])
-            else:
+        if self._send_command("A", atten):
+            resp = self._read_reply()
+            if resp.type == ResponseType.POS:
                 time.sleep(0.5)
-                cur_atten = self.get_attenuation()['data']
+                cur_atten = self.get_attenuation()
                 self.logger.debug(cur_atten)
                 if cur_atten != atten:
-                    self.logger.error("Attenuation setting not achieved!")
-                return {'data': cur_atten}
-
-        return ret
+                    self.report_error("Attenuation setting not achieved!")
+                    return False
+                return True
+            if resp.type == ResponseType.ERROR:
+                self.report_error(resp.value)
+            else:
+                self.report_error("Attenuation setting not achieved!")
+            return False
+        self.report_error("Attenuation setting not achieved!")
+        return False
 
     def set_pos(self, pos=None):  # pylint: disable=W0221
         """
@@ -483,114 +472,121 @@ class OZController(HardwareMotionBase):
         """
 
         # Send move to controller
-        ret = self._send_command("S", pos)
-
-        if 'data' in ret:
-            ret = self._read_reply()
-            if 'error' in ret:
-                self.logger.error(ret['error'])
-            else:
+        if self._send_command("S", pos):
+            resp = self._read_reply()
+            if resp.type == ResponseType.POS:
                 time.sleep(0.5)
-                cur_pos = ret['data']
+                cur_pos = resp.value
                 self.logger.debug(cur_pos)
                 if cur_pos != pos:
-                    self.logger.error("Position not achieved!")
+                    self.logger.error("Position setting not achieved!")
+                    return False
                 self.get_attenuation()
-                return {'data': cur_pos}
+                return True
+            if resp.type == ResponseType.ERROR:
+                self.report_error(resp.value)
+            else:
+                self.report_error("Position setting not achieved!")
+            return False
+        self.report_error("Position setting not achieved!")
+        return False
 
-        return ret
-
-    def step(self, direction:str = 'F'):
+    def step(self, direction:str = 'F') -> Union[int, None]:
         """
         Move stage to relative position and return when in position
         :param direction: String, 'F' - forward or 'B' - backward
-        :return: dictionary {'data|error': current_position|string_message}
+        :return: Current position in steps or None
         """
         direc = direction.upper()
         # check inputs
         if direc not in ['F', 'B']:
-            self.logger.error("Invalid direction: use F or B")
-            return {'error': 'Invalid direction'}
+            self.report_error("Invalid direction: use F or B")
+            return None
 
-        ret = self._send_command(direc)
-        if 'data' in ret:
-            ret = self._read_reply()
-            if 'error' in ret:
-                self.logger.error(ret['error'])
-            else:
-                self.logger.debug(ret['data'])
-                cur_pos = ret['data']
+        if self._send_command(direc):
+            resp = self._read_reply()
+            if resp.type == ResponseType.POS:
+                self.logger.debug(resp.value)
+                cur_pos = resp.value
                 if cur_pos != self.current_position:
                     self.logger.error("Position setting not achieved!")
                     self.current_position = cur_pos
-                return {'data': cur_pos}
-        return ret
+                return cur_pos
+            if resp.type == ResponseType.ERROR:
+                self.report_error(resp.value)
+            else:
+                self.report_error("Position setting not achieved!")
+            return None
+        self.report_error("Position setting not achieved!")
+        return None
 
-    def get_pos(self) -> Dict:  # pylint: disable=W0221
+    def get_pos(self) -> Union[int, None]:  # pylint: disable=W0221
         """ Current position
 
-        :return: dictionary {'data|error': current_position|string_message}
+        :return: current position in steps or None
         """
 
-        ret = self._send_command("S?")
-        if 'data' in ret:
-            ret = self._read_reply()
-            if 'error' in ret:
-                self.logger.error(ret['error'])
-            else:
-                self.logger.debug(ret['data'])
-        return ret
+        if self._send_command("S?"):
+            resp = self._read_reply()
+            if resp.type == ResponseType.POS:
+                self.logger.debug(resp.value)
+                return resp.value
+            if resp.type == ResponseType.ERROR:
+                self.report_error(resp.value)
+            return None
+        return None
 
-    def get_attenuation(self):
+    def get_attenuation(self) -> Union[float, None]:
         """ Current attenuation
 
         :return: dictionary {'data|error': current_attenuation|string_message}
         """
 
-        ret = self._send_command("A?")
-        if 'data' in ret:
-            ret = self._read_reply()
-            if 'error' in ret:
-                self.logger.error(ret['error'])
-            else:
-                self.logger.debug(ret['data'])
-        return ret
+        if self._send_command("A?"):
+            resp = self._read_reply()
+            if resp.type == ResponseType.ATTEN:
+                self.logger.debug(resp.value)
+                return resp.value
+            if resp.type == ResponseType.ERROR:
+                self.report_error(resp.value)
+            return None
+        return None
 
     def reset(self):
         """ Reset stage
 
-        :return: return from __send_command
+        :return: Configuration string
         """
 
-        ret = self._send_command("RS")
-        time.sleep(2.)
+        if self._send_command("RST"):
+            time.sleep(2.)
+            resp = self._read_reply()
+            if resp.type == ResponseType.STRING:
+                self.logger.debug(resp.value)
+                return resp.value
+            if resp.type == ResponseType.ERROR:
+                self.report_error(resp.value)
+            return None
+        self.report_error("Failed to reset stage")
+        return None
 
-        if 'data' in ret:
-            ret = self._read_reply()
-            if 'error' in ret:
-                self.logger.error(ret['error'])
-            else:
-                self.logger.debug(ret['data'])
-
-        return ret
-
-    def get_params(self) -> dict:
+    def get_params(self) -> Union[str, None]:
         """ Get stage parameters
 
         :return: return from __send_command
         """
 
-        ret = self._send_command("CD")
-
-        if 'data' in ret:
-            ret = self._read_reply()
-            if 'error' in ret:
-                self.report_error(ret['error'])
-            else:
-                self.logger.debug(ret['data'])
-                self.configuration = ret['data']
-
-        return ret
+        if self._send_command("CD"):
+            resp = self._read_reply()
+            if resp.type == ResponseType.STRING:
+                self.logger.debug(resp.value)
+                self.configuration = resp.value
+                return resp.value
+            if resp.type == ResponseType.ERROR:
+                self.report_error(resp.value)
+            return None
+        self.report_error("Failed to get stage parameters")
+        return None
 
     def initialize(self) -> bool:
         """ Initialize stage controller. """
