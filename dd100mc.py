@@ -153,7 +153,7 @@ class OZController(HardwareMotionBase):
             tries -= 1
 
         recv_len = len(recv)
-        self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
+        self.report_debug(f"Return: len = {recv_len}, Value = {recv}")
 
         if b'Done' not in recv:
             msg_data = str(recv.decode('utf-8'))
@@ -249,13 +249,12 @@ class OZController(HardwareMotionBase):
 
         # check connection
         if not self.connected:
-            msg_text = "Not connected to controller!"
-            self.report_error(msg_text)
+            self.report_error("Not connected to controller!")
             return False
 
         # Prep command
         cmd_send = f"{cmd}\r\n"
-        self.logger.debug("Sending command: %s", cmd_send)
+        self.report_debug(f"Sending command: {cmd_send}")
         cmd_encoded = cmd_send.encode('utf-8')
 
         try:
@@ -286,12 +285,12 @@ class OZController(HardwareMotionBase):
 
         # Check if the command should have parameters
         if command in self.parameter_commands and args:
-            self.logger.debug("Adding parameters")
+            self.report_debug("Adding parameters")
             parameters = [str(x) for x in args]
             parameters = "".join(parameters)
             command += parameters
 
-        self.logger.debug("Input command: %s", command)
+        self.report_debug(f"Input command: {command}")
 
         # Send serial command
         with self.lock:
@@ -375,7 +374,7 @@ class OZController(HardwareMotionBase):
             self.report_warning("Already disconnected from device")
             return
         try:
-            self.logger.info("Disconnecting from stage controller")
+            self.report_info("Disconnecting from stage controller")
             self.socket.shutdown(socket.SHUT_RDWR)
             self.socket.close()
             self.socket = None
@@ -399,9 +398,9 @@ class OZController(HardwareMotionBase):
                 resp = self._read_reply()
                 if resp.type == ResponseType.DIFF:
                     self.homed = True
-                    self.logger.debug(resp.value)
+                    self.report_debug(f"{resp.value}")
                 elif resp.type == ResponseType.ERROR:
-                    self.report_error(resp.value)
+                    self.report_error(f"{resp.value}")
         else:
             self.report_warning("Already homed.")
 
@@ -428,7 +427,7 @@ class OZController(HardwareMotionBase):
             else:
                 value = float(result)
         else:
-            self.logger.error("Unknown item: %s, choose pos or atten", item)
+            self.report_error(f"Unknown item: {item}, choose pos or atten")
             value = None
         return value
 
@@ -450,13 +449,13 @@ class OZController(HardwareMotionBase):
             if resp.type == ResponseType.POS:
                 time.sleep(0.5)
                 cur_atten = self.get_attenuation()
-                self.logger.debug(cur_atten)
+                self.report_debug(f"{cur_atten}")
                 if cur_atten != atten:
                     self.report_error("Attenuation setting not achieved!")
                     return False
                 return True
             if resp.type == ResponseType.ERROR:
-                self.report_error(resp.value)
+                self.report_error(f"{resp.value}")
             else:
                 self.report_error("Attenuation setting not achieved!")
             return False
@@ -477,14 +476,14 @@ class OZController(HardwareMotionBase):
             if resp.type == ResponseType.POS:
                 time.sleep(0.5)
                 cur_pos = resp.value
-                self.logger.debug(cur_pos)
+                self.report_debug(f"{cur_pos}")
                 if cur_pos != pos:
-                    self.logger.error("Position setting not achieved!")
+                    self.report_error("Position setting not achieved!")
                     return False
                 self.get_attenuation()
                 return True
             if resp.type == ResponseType.ERROR:
-                self.report_error(resp.value)
+                self.report_error(f"{resp.value}")
             else:
                 self.report_error("Position setting not achieved!")
             return False
@@ -506,14 +505,14 @@ class OZController(HardwareMotionBase):
         if self._send_command(direc):
             resp = self._read_reply()
             if resp.type == ResponseType.POS:
-                self.logger.debug(resp.value)
+                self.report_debug(f"{resp.value}")
                 cur_pos = resp.value
                 if cur_pos != self.current_position:
-                    self.logger.error("Position setting not achieved!")
+                    self.report_error("Position setting not achieved!")
                     self.current_position = cur_pos
                 return cur_pos
             if resp.type == ResponseType.ERROR:
-                self.report_error(resp.value)
+                self.report_error(f"{resp.value}")
             else:
                 self.report_error("Position setting not achieved!")
             return None
@@ -529,10 +528,10 @@ class OZController(HardwareMotionBase):
         if self._send_command("S?"):
             resp = self._read_reply()
             if resp.type == ResponseType.POS:
-                self.logger.debug(resp.value)
+                self.report_debug(f"{resp.value}")
                 return resp.value
             if resp.type == ResponseType.ERROR:
-                self.report_error(resp.value)
+                self.report_error(f"{resp.value}")
             return None
         return None
 
@@ -545,10 +544,10 @@ class OZController(HardwareMotionBase):
         if self._send_command("A?"):
             resp = self._read_reply()
             if resp.type == ResponseType.ATTEN:
-                self.logger.debug(resp.value)
+                self.report_debug(f"{resp.value}")
                 return resp.value
             if resp.type == ResponseType.ERROR:
-                self.report_error(resp.value)
+                self.report_error(f"{resp.value}")
             return None
         return None
 
@@ -562,10 +561,10 @@ class OZController(HardwareMotionBase):
             time.sleep(2.)
             resp = self._read_reply()
             if resp.type == ResponseType.STRING:
-                self.logger.debug(resp.value)
+                self.report_debug(f"{resp.value}")
                 return resp.value
             if resp.type == ResponseType.ERROR:
-                self.report_error(resp.value)
+                self.report_error(f"{resp.value}")
             return None
         self.report_error("Failed to reset stage")
         return None
@@ -579,11 +578,11 @@ class OZController(HardwareMotionBase):
         if self._send_command("CD"):
             resp = self._read_reply()
             if resp.type == ResponseType.STRING:
-                self.logger.debug(resp.value)
+                self.report_debug(f"{resp.value}")
                 self.configuration = resp.value
                 return resp.value
             if resp.type == ResponseType.ERROR:
-                self.report_error(resp.value)
+                self.report_error(f"{resp.value}")
             return None
         self.report_error("Failed to get stage parameters")
         return None
@@ -600,7 +599,7 @@ class OZController(HardwareMotionBase):
         try:
             recv = self.socket.recv(2048)
             recv_len = len(recv)
-            self.logger.debug("Return: len = %d, Value = %s", recv_len, recv)
+            self.report_debug(f"Return: len = {recv_len}, Value = {recv}")
         except BlockingIOError:
             recv = b""
         self.socket.setblocking(True)
@@ -622,9 +621,9 @@ class OZController(HardwareMotionBase):
             ret = self._send_command(cmd, custom_command=True)
             if 'error' not in ret:
                 output = self.read_from_controller()
-                self.logger.info(output)
+                self.report_info(output)
 
-            self.logger.info("End: %s", ret)
+            self.report_info(f"End: {ret}")
 
     def close_loop(self) -> bool:
         """ Close loop"""
