@@ -591,6 +591,7 @@ class OZController(HardwareMotionBase):
         """ Initialize stage controller. """
         if not self.home():
             self.report_error("Failed to initialize controller")
+        self.initialized = self.homed
         return self.homed
 
     def read_from_controller(self) -> str:
