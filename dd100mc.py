@@ -104,7 +104,8 @@ class OZController(HardwareMotionBase):
         "Error-7": "Motor voltage exceeds safe limits"
     }
 
-    def __init__(self, log: bool =True, logfile: str =__name__.rsplit(".", 1)[-1]):
+    def __init__(self, log: bool =True, logfile: str =__name__.rsplit(".", 1)[-1],
+                 init_atten: float | None =None):
 
         """
         Class to handle communications with the stage controller and any faults
@@ -120,6 +121,7 @@ class OZController(HardwareMotionBase):
         self.socket = None
 
         self.current_attenuation = None
+        self.init_attenuation = init_atten
         self.current_position = None
         self.current_diff = None
         self.configuration = ""
@@ -160,7 +162,7 @@ class OZController(HardwareMotionBase):
             self.report_error(f"Read from controller timed out: {msg_data}")
             return None
 
-        resp = self._parse_response(str(recv.decode('utf-8')))
+        resp = self._parse_response(str(recv.decode('utf-8', errors='ignore')))
         if resp.type == ResponseType.ERROR:
             self.report_error(resp.value)
 
@@ -168,7 +170,7 @@ class OZController(HardwareMotionBase):
 
     def _parse_response(self, raw: str) -> OzResponse:
         """Parse the response from stage controller."""
-        # pylint: disable=too-many-branches
+        # pylint: disable=too-many-branches,too-many-statements
         raw = raw.strip()
 
         if 'Pos:' in raw:
@@ -194,6 +196,18 @@ class OZController(HardwareMotionBase):
                 atten_read = True
             except ValueError:
                 self.report_error("Error parsing attenuation")
+                atten = None
+                atten_read = False
+        elif 'ATTEN:' in raw:
+            try:
+                if 'unknown' in raw:
+                    atten = None
+                else:
+                    atten = float(raw.split('ATTEN:')[1])
+                self.current_attenuation = atten
+                atten_read = True
+            except ValueError:
+                self.report_error("Error parsing ATTENuation")
                 atten = None
                 atten_read = False
         else:
@@ -589,8 +603,17 @@ class OZController(HardwareMotionBase):
 
     def initialize(self) -> bool:
         """ Initialize stage controller. """
-        if not self.home():
-            self.report_error("Failed to initialize controller")
+        # An initial attenuation was specified
+        if self.init_attenuation is not None:
+            if not self.home():
+                self.report_error("Failed to initialize controller")
+                return False
+            if not self.set_attenuation(self.init_attenuation):
+                self.report_error("Failed to set initial attenuation")
+                return False
+        # No initial attenuation specified, so we assume we are at the required position
+        else:
+            self.homed = True
         self.initialized = self.homed
         return self.homed
 
