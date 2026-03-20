@@ -619,12 +619,11 @@ class OZController(HardwareMotionBase):
             if not cmd:
                 break
 
-            ret = self._send_command(cmd, custom_command=True)
-            if 'error' not in ret:
+            if self._send_command(cmd, custom_command=True):
                 output = self.read_from_controller()
                 self.report_info(output)
-
-            self.report_info(f"End: {ret}")
+            else:
+                self.report_error(f"Error sending command {cmd}")
 
     def close_loop(self) -> bool:
         """ Close loop"""
